@@ -1,16 +1,49 @@
 # diffpane
 
-A real-time TUI diff viewer for AI coding agents.
+Real-time TUI diff viewer for AI coding agents.
 
-Watch what your AI agent changes, right in your terminal.
+Split your terminal. Left: your AI agent. Right: `diffpane` showing every change as it happens.
+
+## Features
+
+- **Live diff** — watches your git worktree and shows changes in real time
+- **Session baseline** — records HEAD at startup, auto-resets on commit
+- **Follow mode** — auto-jumps to the latest changed file (on by default)
+- **Zero dependencies** — single binary, `brew install` and go
+
+## Install
+
+```bash
+brew install Astro-Han/tap/diffpane
+```
+
+Or download from [Releases](https://github.com/Astro-Han/diffpane/releases).
+
+## Usage
+
+```bash
+cd your-project
+diffpane
+```
+
+## Keys
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Scroll diff |
+| `n` / `p` | Next / previous file |
+| `f` | Toggle follow mode |
+| `Tab` | File list |
+| `q` | Quit |
+
+## How it works
+
+`diffpane` records your current `git HEAD` when it starts (the "baseline"). It watches for file changes and shows a live unified diff of everything that changed since the baseline. When you `git commit`, the baseline auto-resets so you only see new changes.
 
 ## Status
 
-Design phase. See [design document](docs/design.md) for details.
+Under development. Not yet functional.
 
-## Docs
+## License
 
-- [Design Document](docs/design.md) - 产品设计（4 轮审查 + crosscheck 通过）
-- [Competitive Landscape](docs/competitive-landscape.md) - 竞品调研（10 个工具，3 个实测）
-- [Naming Research](docs/naming-research.md) - 命名研究
-- [Pain Point](docs/pain-point.md) - 原始痛点记录
+MIT
