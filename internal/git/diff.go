@@ -2,7 +2,6 @@ package git
 
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,7 +63,7 @@ func getTrackedDiff(repoDir, baselineSHA string) ([]internal.FileDiff, error) {
 
 // getUntrackedDiff expands untracked files and directories to synthetic added diffs.
 func getUntrackedDiff(repoDir string) ([]internal.FileDiff, error) {
-	cmd := exec.Command("git", "status", "--porcelain")
+	cmd := exec.Command("git", "status", "--porcelain", "-z", "--untracked-files=all")
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
 	if err != nil {
@@ -72,37 +71,12 @@ func getUntrackedDiff(repoDir string) ([]internal.FileDiff, error) {
 	}
 
 	var files []internal.FileDiff
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" || !strings.HasPrefix(line, "?? ") {
+	for _, entry := range strings.Split(string(out), "\x00") {
+		if entry == "" || !strings.HasPrefix(entry, "?? ") {
 			continue
 		}
 
-		path := strings.TrimPrefix(line, "?? ")
-		if strings.HasSuffix(path, "/") {
-			dirPath := filepath.Join(repoDir, strings.TrimSuffix(path, "/"))
-			walkErr := filepath.WalkDir(dirPath, func(current string, d fs.DirEntry, err error) error {
-				if err != nil || d.IsDir() {
-					return nil
-				}
-
-				rel, relErr := filepath.Rel(repoDir, current)
-				if relErr != nil {
-					return nil
-				}
-				// #nosec G304,G122 -- current comes from walking inside the repository root.
-				data, readErr := os.ReadFile(current)
-				if readErr != nil {
-					return nil
-				}
-				files = append(files, buildNewFileDiff(rel, string(data)))
-				return nil
-			})
-			if walkErr != nil {
-				return nil, walkErr
-			}
-			continue
-		}
-
+		path := strings.TrimPrefix(entry, "?? ")
 		// #nosec G304 -- path comes from git status output scoped to the repository.
 		data, readErr := os.ReadFile(filepath.Join(repoDir, path))
 		if readErr != nil {

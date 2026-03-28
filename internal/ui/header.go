@@ -13,6 +13,7 @@ func RenderHeader(dirName string, files []internal.FileDiff, currentIdx, newCoun
 		return StyleDim.Render(fmt.Sprintf("%s · watching", dirName))
 	}
 
+	currentIdx = min(max(currentIdx, 0), len(files)-1)
 	file := files[currentIdx]
 	paths := make([]string, len(files))
 	for i, item := range files {
@@ -21,24 +22,7 @@ func RenderHeader(dirName string, files []internal.FileDiff, currentIdx, newCoun
 	shortPaths := ShortestUniquePaths(paths)
 	displayPath := shortPaths[currentIdx]
 
-	var stats string
-	switch {
-	case file.IsBinary:
-		stats = StyleDim.Render("[binary]")
-	case file.Status == internal.StatusDeleted:
-		stats = StyleDel.Render("[deleted]")
-	default:
-		var parts []string
-		if file.AddCount > 0 {
-			parts = append(parts, StyleAdd.Render(fmt.Sprintf("+%d", file.AddCount)))
-		}
-		if file.DelCount > 0 {
-			parts = append(parts, StyleDel.Render(fmt.Sprintf("-%d", file.DelCount)))
-		}
-		stats = strings.Join(parts, " ")
-	}
-
-	result := fmt.Sprintf("%s %s", displayPath, stats)
+	result := fmt.Sprintf("%s %s", displayPath, renderFileStats(file))
 	if len(files) > 1 {
 		result += StyleDim.Render(fmt.Sprintf(" ‹ %d/%d ›", currentIdx+1, len(files)))
 	}
@@ -47,4 +31,23 @@ func RenderHeader(dirName string, files []internal.FileDiff, currentIdx, newCoun
 	}
 
 	return result
+}
+
+// renderFileStats formats one file's change summary for header and overlay views.
+func renderFileStats(file internal.FileDiff) string {
+	switch {
+	case file.IsBinary:
+		return StyleDim.Render("[binary]")
+	case file.Status == internal.StatusDeleted:
+		return StyleDel.Render("[deleted]")
+	default:
+		var parts []string
+		if file.AddCount > 0 {
+			parts = append(parts, StyleAdd.Render(fmt.Sprintf("+%d", file.AddCount)))
+		}
+		if file.DelCount > 0 {
+			parts = append(parts, StyleDel.Render(fmt.Sprintf("-%d", file.DelCount)))
+		}
+		return strings.Join(parts, " ")
+	}
 }

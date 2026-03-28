@@ -121,6 +121,8 @@ func sendFilesUpdated(stderr io.Writer, sender messageSender, root, baselineSHA 
 }
 
 func sendBaselineReset(stderr io.Writer, sender messageSender, root, newSHA string) {
+	// Bubble Tea preserves send order, so the reset lands before the fresh diff
+	// recomputation for the new baseline.
 	sender.Send(ui.BaselineResetMsg{NewSHA: newSHA})
 	sendFilesUpdated(stderr, sender, root, newSHA, nil)
 }

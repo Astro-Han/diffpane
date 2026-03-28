@@ -100,7 +100,7 @@ func (fw *FileWatcher) loop() {
 			}
 
 			worktreeGit := filepath.Join(fw.repoDir, ".git")
-			if path == worktreeGit || strings.HasPrefix(path, worktreeGit+string(filepath.Separator)) {
+			if path == worktreeGit {
 				continue
 			}
 			if fw.isIgnored(path) {

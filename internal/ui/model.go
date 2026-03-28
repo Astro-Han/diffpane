@@ -55,6 +55,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.Width = msg.Width
 		m.Height = msg.Height
+		m.clampScrollOffset()
 		return m, nil
 	case FilesUpdatedMsg:
 		return m.handleFilesUpdated(msg)
@@ -107,13 +108,16 @@ func (m Model) applyFilesUpdate(msg FilesUpdatedMsg) Model {
 
 	if m.FollowOn && len(m.Files) > 0 {
 		target := len(m.Files) - 1
-		for i, file := range m.Files {
-			for _, changedPath := range msg.ChangedPaths {
+		for i := len(msg.ChangedPaths) - 1; i >= 0; i-- {
+			changedPath := msg.ChangedPaths[i]
+			for j, file := range m.Files {
 				if file.Path == changedPath {
-					target = i
+					target = j
+					goto followTargetFound
 				}
 			}
 		}
+	followTargetFound:
 		m.CurrentIdx = target
 		m.ScrollOffset = 0
 		m.NewFiles = make(map[string]bool)
@@ -152,6 +156,7 @@ func (m Model) applyFilesUpdate(msg FilesUpdatedMsg) Model {
 		m.NewCount = 0
 	}
 
+	m.clampScrollOffset()
 	return m
 }
 
@@ -161,11 +166,13 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "j", "down":
 		m.ScrollOffset++
+		m.clampScrollOffset()
 		return m, nil
 	case "k", "up":
 		if m.ScrollOffset > 0 {
 			m.ScrollOffset--
 		}
+		m.clampScrollOffset()
 		return m, nil
 	case "n":
 		if len(m.Files) > 1 {
@@ -271,13 +278,41 @@ func (m *Model) selectLatestPendingFile() {
 	}
 }
 
+// clampScrollOffset keeps scroll state within the current diff viewport bounds.
+func (m *Model) clampScrollOffset() {
+	if m.ScrollOffset < 0 {
+		m.ScrollOffset = 0
+		return
+	}
+
+	maxOffset := m.maxScrollOffset()
+	if m.ScrollOffset > maxOffset {
+		m.ScrollOffset = maxOffset
+	}
+}
+
+// maxScrollOffset returns the furthest scroll position that can show diff content.
+func (m Model) maxScrollOffset() int {
+	if len(m.Files) == 0 || m.CurrentIdx < 0 || m.CurrentIdx >= len(m.Files) {
+		return 0
+	}
+
+	diffHeight := max(0, m.Height-2)
+	if diffHeight == 0 {
+		return 0
+	}
+
+	totalLines := countVisualDiffLines(&m.Files[m.CurrentIdx], m.Width)
+	return max(0, totalLines-diffHeight)
+}
+
 // View renders header, content, and footer into the terminal viewport.
 func (m Model) View() string {
 	if m.Width == 0 || m.Height == 0 {
 		return ""
 	}
 
-	diffHeight := m.Height - 2
+	diffHeight := max(0, m.Height-2)
 	header := RenderHeader(m.DirName, m.Files, m.CurrentIdx, m.NewCount)
 	footer := RenderFooter(m.FollowOn, m.Notification)
 

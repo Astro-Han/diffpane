@@ -192,6 +192,33 @@ func TestComputeDiffUntrackedBinaryFile(t *testing.T) {
 	}
 }
 
+// TestComputeDiffUntrackedFileWithSpaces verifies porcelain quoting does not
+// leak into reported untracked paths.
+func TestComputeDiffUntrackedFileWithSpaces(t *testing.T) {
+	root := initGitRepo(t)
+	runGit(t, root, "commit", "--allow-empty", "-m", "init")
+
+	baseline, err := GetHeadSHA(root)
+	if err != nil {
+		t.Fatalf("GetHeadSHA returned error: %v", err)
+	}
+	const name = "two words.txt"
+	if err := os.WriteFile(filepath.Join(root, name), []byte("hello\n"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	files, err := ComputeDiff(root, baseline)
+	if err != nil {
+		t.Fatalf("ComputeDiff returned error: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	if files[0].Path != name {
+		t.Fatalf("path = %q, want %q", files[0].Path, name)
+	}
+}
+
 // TestComputeDiffNoChanges verifies a clean worktree produces no diffs.
 func TestComputeDiffNoChanges(t *testing.T) {
 	root := initGitRepo(t)

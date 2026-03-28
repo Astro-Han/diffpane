@@ -9,11 +9,38 @@ import (
 
 // RenderDiffView renders the current file diff within the viewport.
 func RenderDiffView(file *internal.FileDiff, scrollOffset, width, height int) string {
-	if file == nil {
+	lines := diffDisplayLines(file, width)
+
+	if scrollOffset < 0 {
+		scrollOffset = 0
+	}
+	if scrollOffset >= len(lines) {
+		scrollOffset = max(0, len(lines)-1)
+	}
+
+	end := scrollOffset + height
+	if end > len(lines) {
+		end = len(lines)
+	}
+	if scrollOffset >= end {
 		return ""
 	}
+
+	return strings.Join(lines[scrollOffset:end], "\n")
+}
+
+// countVisualDiffLines returns how many terminal rows the diff content occupies.
+func countVisualDiffLines(file *internal.FileDiff, width int) int {
+	return len(diffDisplayLines(file, width))
+}
+
+// diffDisplayLines expands one file diff into the exact visual lines shown in the viewport.
+func diffDisplayLines(file *internal.FileDiff, width int) []string {
+	if file == nil {
+		return nil
+	}
 	if file.IsBinary {
-		return StyleDim.Render("Binary file changed")
+		return []string{StyleDim.Render("Binary file changed")}
 	}
 
 	var lines []string
@@ -35,22 +62,7 @@ func RenderDiffView(file *internal.FileDiff, scrollOffset, width, height int) st
 		}
 	}
 
-	if scrollOffset < 0 {
-		scrollOffset = 0
-	}
-	if scrollOffset >= len(lines) {
-		scrollOffset = max(0, len(lines)-1)
-	}
-
-	end := scrollOffset + height
-	if end > len(lines) {
-		end = len(lines)
-	}
-	if scrollOffset >= end {
-		return ""
-	}
-
-	return strings.Join(lines[scrollOffset:end], "\n")
+	return lines
 }
 
 // wrapLine wraps one rendered line by terminal cell width.

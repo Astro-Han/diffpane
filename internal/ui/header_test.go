@@ -44,3 +44,19 @@ func TestRenderHeaderNewCount(t *testing.T) {
 		t.Fatalf("header = %q, want +3 new", header)
 	}
 }
+
+// TestRenderHeaderOutOfRangeIndex verifies defensive index clamping avoids panics.
+func TestRenderHeaderOutOfRangeIndex(t *testing.T) {
+	files := []internal.FileDiff{{Path: "a.ts", AddCount: 1}}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("RenderHeader panicked for out-of-range index: %v", r)
+		}
+	}()
+
+	header := RenderHeader("myproject", files, 9, 0)
+	if !strings.Contains(header, "a.ts") {
+		t.Fatalf("header = %q, want file path", header)
+	}
+}

@@ -36,6 +36,30 @@ func TestModelFollowSelectsLatestChanged(t *testing.T) {
 	}
 }
 
+// TestModelFollowUsesMostRecentChangedPath verifies active follow mode prefers
+// the last changed path in the debounce batch instead of file sort order.
+func TestModelFollowUsesMostRecentChangedPath(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		file("a.txt", 1),
+		file("b.txt", 1),
+		file("c.txt", 1),
+	})
+
+	updated, _ := model.Update(FilesUpdatedMsg{
+		Files: []internal.FileDiff{
+			file("a.txt", 1),
+			file("b.txt", 1),
+			file("c.txt", 1),
+		},
+		ChangedPaths: []string{"c.txt", "b.txt"},
+	})
+
+	got := updated.(Model)
+	if got.CurrentIdx != 1 {
+		t.Fatalf("CurrentIdx = %d, want 1 for most recent path b.txt", got.CurrentIdx)
+	}
+}
+
 // TestModelPausedFollowTracksNewFiles verifies paused follow accumulates new unique files.
 func TestModelPausedFollowTracksNewFiles(t *testing.T) {
 	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
@@ -202,5 +226,52 @@ func TestModelDropsQueuedOverlayUpdateAfterBaselineReset(t *testing.T) {
 	got := closed.(Model)
 	if len(got.Files) != 1 || got.Files[0].Path != "old.txt" {
 		t.Fatalf("stale overlay update should be dropped, got %#v", got.Files)
+	}
+}
+
+// TestModelViewSmallHeightDoesNotPanic verifies tiny terminal heights do not
+// trigger negative content heights in overlay rendering.
+func TestModelViewSmallHeightDoesNotPanic(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		file("a.txt", 1),
+	})
+	model.Width = 80
+	model.Height = 1
+	model.OverlayOpen = true
+	model.OverlaySnapshot = append([]internal.FileDiff(nil), model.Files...)
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("View panicked for small height: %v", r)
+		}
+	}()
+
+	_ = model.View()
+}
+
+// TestModelScrollOffsetStaysWithinContent verifies repeated down-navigation does
+// not grow scroll state beyond the visible diff content.
+func TestModelScrollOffsetStaysWithinContent(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{{
+		Path:     "a.txt",
+		AddCount: 1,
+		Hunks: []internal.DiffHunk{{
+			Header: "@@ -0,0 +1,1 @@",
+			Lines: []internal.DiffLine{{
+				Type:    internal.LineAdd,
+				Content: "hello",
+			}},
+		}},
+	}})
+	model.Width = 80
+	model.Height = 4
+
+	for range 3 {
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model = updated.(Model)
+	}
+
+	if model.ScrollOffset != 0 {
+		t.Fatalf("ScrollOffset = %d, want 0", model.ScrollOffset)
 	}
 }
