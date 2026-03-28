@@ -329,7 +329,11 @@ func (m Model) View() string {
 	}
 	padding := ""
 	if contentLines < diffHeight {
-		padding = strings.Repeat("\n", diffHeight-contentLines)
+		paddingLines := diffHeight - contentLines
+		if contentLines == 0 && paddingLines > 0 {
+			paddingLines--
+		}
+		padding = strings.Repeat("\n", paddingLines)
 	}
 
 	return header + "\n" + content + padding + "\n" + footer

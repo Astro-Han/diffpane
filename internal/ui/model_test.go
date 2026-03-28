@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Astro-Han/diffpane/internal"
@@ -247,6 +248,26 @@ func TestModelViewSmallHeightDoesNotPanic(t *testing.T) {
 	}()
 
 	_ = model.View()
+}
+
+// TestModelViewEmptyStateFitsViewport verifies the empty-state header and footer
+// both remain visible within the terminal height instead of scrolling off-screen.
+func TestModelViewEmptyStateFitsViewport(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", nil)
+	model.Width = 80
+	model.Height = 4
+
+	view := model.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) != 4 {
+		t.Fatalf("line count = %d, want 4; view = %q", len(lines), view)
+	}
+	if !strings.Contains(lines[0], "repo") || !strings.Contains(lines[0], "watching") {
+		t.Fatalf("first line = %q, want empty-state header", lines[0])
+	}
+	if !strings.Contains(lines[3], "q quit") {
+		t.Fatalf("last line = %q, want footer", lines[3])
+	}
 }
 
 // TestModelScrollOffsetStaysWithinContent verifies repeated down-navigation does
