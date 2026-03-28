@@ -89,6 +89,7 @@ func (m Model) handleFilesUpdated(msg FilesUpdatedMsg) (tea.Model, tea.Cmd) {
 		if m.PendingUpdate == nil {
 			m.PendingUpdate = &msg
 		} else {
+			m.PendingUpdate.BaselineSHA = msg.BaselineSHA
 			m.PendingUpdate.Files = msg.Files
 			m.PendingUpdate.ChangedPaths = append(m.PendingUpdate.ChangedPaths, msg.ChangedPaths...)
 		}
@@ -124,11 +125,23 @@ func (m Model) applyFilesUpdate(msg FilesUpdatedMsg) Model {
 		m.LastChangedPath = ""
 		m.NewCount = 0
 	} else if !m.FollowOn {
+		presentPaths := make(map[string]bool, len(m.Files))
+		for _, file := range m.Files {
+			presentPaths[file.Path] = true
+		}
+		for path := range m.NewFiles {
+			if !presentPaths[path] || path == currentPath {
+				delete(m.NewFiles, path)
+			}
+		}
 		for _, changedPath := range msg.ChangedPaths {
-			if changedPath != currentPath {
+			if changedPath != currentPath && presentPaths[changedPath] {
 				m.NewFiles[changedPath] = true
 				m.LastChangedPath = changedPath
 			}
+		}
+		if m.LastChangedPath != "" && !m.NewFiles[m.LastChangedPath] {
+			m.LastChangedPath = ""
 		}
 		m.NewCount = len(m.NewFiles)
 
@@ -313,12 +326,12 @@ func (m Model) View() string {
 	}
 
 	diffHeight := max(0, m.Height-2)
-	header := RenderHeader(m.DirName, m.Files, m.CurrentIdx, m.NewCount)
-	footer := RenderFooter(m.FollowOn, m.Notification)
+	header := RenderHeader(m.DirName, m.Files, m.CurrentIdx, m.NewCount, m.Width)
+	footer := RenderFooter(m.FollowOn, m.Notification, m.Width)
 
 	var content string
 	if m.OverlayOpen {
-		content = RenderOverlay(m.OverlaySnapshot, m.OverlayCursor, diffHeight)
+		content = RenderOverlay(m.OverlaySnapshot, m.OverlayCursor, diffHeight, m.Width)
 	} else if len(m.Files) > 0 && m.CurrentIdx < len(m.Files) {
 		content = RenderDiffView(&m.Files[m.CurrentIdx], m.ScrollOffset, m.Width, diffHeight)
 	}

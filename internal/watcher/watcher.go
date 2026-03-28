@@ -193,6 +193,9 @@ func (fw *FileWatcher) addDirRecursive(dir string) {
 			if entry.Name() == ".git" {
 				return filepath.SkipDir
 			}
+			if path != fw.repoDir && fw.isIgnored(path) {
+				return filepath.SkipDir
+			}
 			_ = fw.fsw.Add(path)
 		}
 		return nil

@@ -8,9 +8,9 @@ import (
 )
 
 // RenderHeader renders the single-line top bar.
-func RenderHeader(dirName string, files []internal.FileDiff, currentIdx, newCount int) string {
+func RenderHeader(dirName string, files []internal.FileDiff, currentIdx, newCount, width int) string {
 	if len(files) == 0 {
-		return StyleDim.Render(fmt.Sprintf("%s · watching", dirName))
+		return clampInlineWidth(StyleDim.Render(fmt.Sprintf("%s · watching", dirName)), width)
 	}
 
 	currentIdx = min(max(currentIdx, 0), len(files)-1)
@@ -30,7 +30,7 @@ func RenderHeader(dirName string, files []internal.FileDiff, currentIdx, newCoun
 		result += "  " + StyleAdd.Render(fmt.Sprintf("+%d new", newCount))
 	}
 
-	return result
+	return clampInlineWidth(result, width)
 }
 
 // renderFileStats formats one file's change summary for header and overlay views.

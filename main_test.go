@@ -11,8 +11,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// TestMainNotGitRepoExitsWithCodeOne verifies the CLI reports non-git usage as a failure.
-func TestMainNotGitRepoExitsWithCodeOne(t *testing.T) {
+// TestMainNotGitRepoExitsCleanly verifies the CLI reports non-git usage
+// without treating the friendly message as an error.
+func TestMainNotGitRepoExitsCleanly(t *testing.T) {
 	dir := t.TempDir()
 
 	// #nosec G204,G702 -- tests execute the current test binary with controlled args.
@@ -20,16 +21,16 @@ func TestMainNotGitRepoExitsWithCodeOne(t *testing.T) {
 	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
 	out, err := cmd.CombinedOutput()
 
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("expected process exit error, got %v with output %q", err, out)
-	}
-	if exitErr.ExitCode() != 1 {
-		t.Fatalf("exit code = %d, want 1", exitErr.ExitCode())
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			t.Fatalf("exit code = %d, want 0; output = %q", exitErr.ExitCode(), out)
+		}
+		t.Fatalf("expected clean exit, got %v with output %q", err, out)
 	}
 
 	got := strings.TrimSpace(string(out))
-	want := "Not a git repository. Run `git init` to get started."
+	want := "Not a git repository. Run git init to get started."
 	if got != want {
 		t.Fatalf("output = %q, want %q", got, want)
 	}

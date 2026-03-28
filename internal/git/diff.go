@@ -17,6 +17,12 @@ func ComputeDiff(repoDir, baselineSHA string) ([]internal.FileDiff, error) {
 	if err != nil {
 		return nil, fmt.Errorf("git diff: %w", err)
 	}
+	if baselineSHA == EmptyTreeSHA {
+		tracked, err = overlayFreshRepoWorktreeChanges(repoDir, tracked)
+		if err != nil {
+			return nil, fmt.Errorf("git diff worktree: %w", err)
+		}
+	}
 
 	untracked, err := getUntrackedDiff(repoDir)
 	if err != nil {
@@ -59,6 +65,45 @@ func getTrackedDiff(repoDir, baselineSHA string) ([]internal.FileDiff, error) {
 	}
 
 	return ParseDiff(string(out)), nil
+}
+
+// overlayFreshRepoWorktreeChanges replaces cached added-file diffs with the
+// current worktree content for unborn-repo paths that were edited after staging.
+func overlayFreshRepoWorktreeChanges(repoDir string, tracked []internal.FileDiff) ([]internal.FileDiff, error) {
+	cmd := exec.Command("git", "diff", "--name-only", "-z", "--")
+	cmd.Dir = repoDir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	indexByPath := make(map[string]int, len(tracked))
+	result := append([]internal.FileDiff(nil), tracked...)
+	for i, file := range result {
+		indexByPath[file.Path] = i
+	}
+
+	for _, path := range strings.Split(string(out), "\x00") {
+		if path == "" {
+			continue
+		}
+
+		// #nosec G304 -- path comes from git diff output scoped to the repository.
+		data, readErr := os.ReadFile(filepath.Join(repoDir, path))
+		if readErr != nil {
+			continue
+		}
+
+		diff := buildNewFileDiff(path, string(data))
+		if idx, ok := indexByPath[path]; ok {
+			result[idx] = diff
+			continue
+		}
+		indexByPath[path] = len(result)
+		result = append(result, diff)
+	}
+
+	return result, nil
 }
 
 // getUntrackedDiff expands untracked files and directories to synthetic added diffs.
