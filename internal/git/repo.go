@@ -91,6 +91,29 @@ func ResolveGitDir(repoDir string) string {
 	return filepath.Clean(filepath.Join(repoDir, gitDir))
 }
 
+// GetGitCommonDir returns the common git directory shared by linked worktrees.
+func GetGitCommonDir(repoDir string) string {
+	root, err := FindWorktreeRoot(repoDir)
+	if err != nil {
+		return ""
+	}
+
+	out, err := gitOutput(root, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return ""
+	}
+
+	commonDir := strings.TrimSpace(out)
+	if commonDir == "" {
+		return ""
+	}
+	if filepath.IsAbs(commonDir) {
+		return commonDir
+	}
+
+	return filepath.Clean(filepath.Join(root, commonDir))
+}
+
 // gitOutput runs git in dir and returns stdout.
 func gitOutput(dir string, args ...string) (string, error) {
 	// #nosec G204 -- git is fixed and arguments are constructed by trusted callers.

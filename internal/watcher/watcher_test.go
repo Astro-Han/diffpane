@@ -1,6 +1,7 @@
 package watcher
 
 import (
+	"bytes"
 	"path/filepath"
 	"testing"
 )
@@ -31,6 +32,13 @@ func TestIsGitInternalPath(t *testing.T) {
 	}
 }
 
+// TestIsGitInternalPathEmptyGitDir verifies an empty gitDir never matches absolute paths.
+func TestIsGitInternalPathEmptyGitDir(t *testing.T) {
+	if isGitInternalPath("/tmp/repo/file.go", "") {
+		t.Fatal("empty gitDir should not match arbitrary paths")
+	}
+}
+
 // TestIsHeadOrRefPath verifies only HEAD and refs trigger baseline resets.
 func TestIsHeadOrRefPath(t *testing.T) {
 	gitDir := "/Users/test/myrepo/.git"
@@ -49,5 +57,17 @@ func TestIsHeadOrRefPath(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("isHeadOrRefPath(%q) = %v, want %v", tc.path, got, tc.want)
 		}
+	}
+}
+
+// TestReportError writes watcher async errors to the configured error writer.
+func TestReportError(t *testing.T) {
+	var stderr bytes.Buffer
+	fw := &FileWatcher{errWriter: &stderr}
+
+	fw.reportError("watcher error")
+
+	if stderr.String() != "watcher error\n" {
+		t.Fatalf("stderr = %q, want watcher error line", stderr.String())
 	}
 }

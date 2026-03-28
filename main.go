@@ -3,6 +3,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -12,6 +13,10 @@ import (
 	"github.com/Astro-Han/diffpane/internal/watcher"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+type messageSender interface {
+	Send(msg tea.Msg)
+}
 
 // main starts the TUI and wires file-system events into diff recomputation.
 func main() {
@@ -48,24 +53,29 @@ func main() {
 	baseline := sha
 	branch := gitpkg.GetBranchName(root)
 	gitDir := gitpkg.ResolveGitDir(root)
+	if gitDir == "" {
+		fmt.Fprintln(os.Stderr, "Error starting watcher: could not resolve git directory")
+		os.Exit(1)
+	}
+	commonGitDir := gitpkg.GetGitCommonDir(root)
+	if commonGitDir == "" {
+		commonGitDir = gitDir
+	}
 
 	fileWatcher, err := watcher.New(
 		root,
 		gitDir,
+		commonGitDir,
 		func(changedPaths []string) {
 			mu.Lock()
 			currentBaseline := baseline
 			mu.Unlock()
-
-			newFiles, computeErr := gitpkg.ComputeDiff(root, currentBaseline)
-			if computeErr != nil {
-				return
-			}
-			program.Send(ui.FilesUpdatedMsg{Files: newFiles, ChangedPaths: changedPaths})
+			sendFilesUpdated(os.Stderr, program, root, currentBaseline, changedPaths)
 		},
 		func() {
 			newSHA, shaErr := gitpkg.GetHeadSHA(root)
 			if shaErr != nil {
+				fmt.Fprintf(os.Stderr, "Error reading HEAD: %v\n", shaErr)
 				return
 			}
 			newBranch := gitpkg.GetBranchName(root)
@@ -82,12 +92,7 @@ func main() {
 				return
 			}
 
-			program.Send(ui.BaselineResetMsg{NewSHA: newSHA})
-			newFiles, computeErr := gitpkg.ComputeDiff(root, newSHA)
-			if computeErr != nil {
-				return
-			}
-			program.Send(ui.FilesUpdatedMsg{Files: newFiles, ChangedPaths: nil})
+			sendBaselineReset(os.Stderr, program, root, newSHA)
 		},
 	)
 	if err != nil {
@@ -100,4 +105,22 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func sendFilesUpdated(stderr io.Writer, sender messageSender, root, baselineSHA string, changedPaths []string) {
+	newFiles, computeErr := gitpkg.ComputeDiff(root, baselineSHA)
+	if computeErr != nil {
+		_, _ = fmt.Fprintf(stderr, "Error computing diff: %v\n", computeErr)
+		return
+	}
+	sender.Send(ui.FilesUpdatedMsg{
+		BaselineSHA:  baselineSHA,
+		Files:        newFiles,
+		ChangedPaths: changedPaths,
+	})
+}
+
+func sendBaselineReset(stderr io.Writer, sender messageSender, root, newSHA string) {
+	sender.Send(ui.BaselineResetMsg{NewSHA: newSHA})
+	sendFilesUpdated(stderr, sender, root, newSHA, nil)
 }

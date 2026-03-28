@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"os/exec"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // TestMainNotGitRepoExitsWithCodeOne verifies the CLI reports non-git usage as a failure.
@@ -45,4 +48,28 @@ func TestMainHelperProcess(_ *testing.T) {
 
 	main()
 	os.Exit(0)
+}
+
+// TestSendFilesUpdatedLogsComputeErrors verifies asynchronous diff failures are
+// surfaced instead of silently ignored.
+func TestSendFilesUpdatedLogsComputeErrors(t *testing.T) {
+	var stderr bytes.Buffer
+	sender := &fakeSender{}
+
+	sendFilesUpdated(&stderr, sender, "/definitely/missing", "sha", []string{"a.txt"})
+
+	if !strings.Contains(stderr.String(), "Error computing diff:") {
+		t.Fatalf("stderr = %q, want compute diff error", stderr.String())
+	}
+	if len(sender.messages) != 0 {
+		t.Fatalf("expected no messages on error, got %d", len(sender.messages))
+	}
+}
+
+type fakeSender struct {
+	messages []tea.Msg
+}
+
+func (f *fakeSender) Send(msg tea.Msg) {
+	f.messages = append(f.messages, msg)
 }

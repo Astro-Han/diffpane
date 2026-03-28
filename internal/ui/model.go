@@ -17,11 +17,12 @@ type Model struct {
 	Files      []internal.FileDiff
 	CurrentIdx int
 
-	FollowOn     bool
-	ScrollOffset int
-	NewCount     int
-	NewFiles     map[string]bool
-	Notification string
+	FollowOn        bool
+	ScrollOffset    int
+	NewCount        int
+	NewFiles        map[string]bool
+	LastChangedPath string
+	Notification    string
 
 	OverlayOpen      bool
 	OverlayCursor    int
@@ -79,6 +80,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleFilesUpdated(msg FilesUpdatedMsg) (tea.Model, tea.Cmd) {
+	if msg.BaselineSHA != "" && msg.BaselineSHA != m.BaselineSHA {
+		return m, nil
+	}
+
 	if m.OverlayOpen {
 		if m.PendingUpdate == nil {
 			m.PendingUpdate = &msg
@@ -112,11 +117,13 @@ func (m Model) applyFilesUpdate(msg FilesUpdatedMsg) Model {
 		m.CurrentIdx = target
 		m.ScrollOffset = 0
 		m.NewFiles = make(map[string]bool)
+		m.LastChangedPath = ""
 		m.NewCount = 0
 	} else if !m.FollowOn {
 		for _, changedPath := range msg.ChangedPaths {
 			if changedPath != currentPath {
 				m.NewFiles[changedPath] = true
+				m.LastChangedPath = changedPath
 			}
 		}
 		m.NewCount = len(m.NewFiles)
@@ -141,6 +148,7 @@ func (m Model) applyFilesUpdate(msg FilesUpdatedMsg) Model {
 		m.CurrentIdx = 0
 		m.ScrollOffset = 0
 		m.NewFiles = make(map[string]bool)
+		m.LastChangedPath = ""
 		m.NewCount = 0
 	}
 
@@ -180,6 +188,7 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 	case "f":
 		m.FollowOn = !m.FollowOn
 		if m.FollowOn {
+			m.selectLatestPendingFile()
 			m.NewCount = 0
 			m.NewFiles = make(map[string]bool)
 		}
@@ -223,6 +232,7 @@ func (m Model) handleOverlayKey(key string) (tea.Model, tea.Cmd) {
 		return m.closeOverlay(), nil
 	case "f":
 		m.FollowOn = true
+		m.selectLatestPendingFile()
 		m.NewCount = 0
 		m.NewFiles = make(map[string]bool)
 		return m.closeOverlay(), nil
@@ -234,11 +244,31 @@ func (m Model) handleOverlayKey(key string) (tea.Model, tea.Cmd) {
 func (m Model) closeOverlay() Model {
 	m.OverlayOpen = false
 	m.OverlaySnapshot = nil
-	if m.PendingUpdate != nil {
+	if m.PendingUpdate != nil && (m.PendingUpdate.BaselineSHA == "" || m.PendingUpdate.BaselineSHA == m.BaselineSHA) {
 		m = m.applyFilesUpdate(*m.PendingUpdate)
-		m.PendingUpdate = nil
 	}
+	m.PendingUpdate = nil
 	return m
+}
+
+func (m *Model) selectLatestPendingFile() {
+	if m.LastChangedPath != "" {
+		for i, file := range m.Files {
+			if file.Path == m.LastChangedPath {
+				m.CurrentIdx = i
+				m.ScrollOffset = 0
+				return
+			}
+		}
+	}
+
+	for i := len(m.Files) - 1; i >= 0; i-- {
+		if m.NewFiles[m.Files[i].Path] {
+			m.CurrentIdx = i
+			m.ScrollOffset = 0
+			return
+		}
+	}
 }
 
 // View renders header, content, and footer into the terminal viewport.

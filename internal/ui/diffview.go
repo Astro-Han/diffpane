@@ -22,11 +22,15 @@ func RenderDiffView(file *internal.FileDiff, scrollOffset, width, height int) st
 		for _, diffLine := range hunk.Lines {
 			switch diffLine.Type {
 			case internal.LineAdd:
-				lines = append(lines, StyleAdd.Render(wrapLine("+"+diffLine.Content, width)))
+				for _, visualLine := range wrapLineParts("+"+diffLine.Content, width) {
+					lines = append(lines, StyleAdd.Render(visualLine))
+				}
 			case internal.LineDel:
-				lines = append(lines, StyleDel.Render(wrapLine("-"+diffLine.Content, width)))
+				for _, visualLine := range wrapLineParts("-"+diffLine.Content, width) {
+					lines = append(lines, StyleDel.Render(visualLine))
+				}
 			default:
-				lines = append(lines, wrapLine(" "+diffLine.Content, width))
+				lines = append(lines, wrapLineParts(" "+diffLine.Content, width)...)
 			}
 		}
 	}
@@ -51,29 +55,32 @@ func RenderDiffView(file *internal.FileDiff, scrollOffset, width, height int) st
 
 // wrapLine wraps one rendered line by terminal cell width.
 func wrapLine(line string, width int) string {
+	return strings.Join(wrapLineParts(line, width), "\n")
+}
+
+// wrapLineParts wraps one rendered line into visual lines by terminal cell width.
+func wrapLineParts(line string, width int) []string {
 	if width <= 0 || runewidth.StringWidth(line) <= width {
-		return line
+		return []string{line}
 	}
 
-	var result strings.Builder
+	var result []string
 	first := truncateToWidth(line, width)
-	result.WriteString(first)
+	result = append(result, first)
 	remaining := line[len(first):]
 
 	for len(remaining) > 0 {
-		result.WriteString("\n")
 		prefix := "  "
 		chunkWidth := width - runewidth.StringWidth(prefix)
 		if chunkWidth <= 0 {
 			chunkWidth = 1
 		}
 		chunk := truncateToWidth(remaining, chunkWidth)
-		result.WriteString(prefix)
-		result.WriteString(chunk)
+		result = append(result, prefix+chunk)
 		remaining = remaining[len(chunk):]
 	}
 
-	return result.String()
+	return result
 }
 
 // truncateToWidth returns the longest prefix that fits within width cells.

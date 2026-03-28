@@ -160,3 +160,29 @@ func TestResolveGitDirLinkedWorktree(t *testing.T) {
 	want := filepath.Join(repo, ".git", "worktrees", "linked")
 	samePath(t, got, want)
 }
+
+// TestGetGitCommonDirNormalRepo resolves the common git dir for a standard repo.
+func TestGetGitCommonDirNormalRepo(t *testing.T) {
+	root := initGitRepo(t)
+
+	got := GetGitCommonDir(root)
+	want := filepath.Join(root, ".git")
+	samePath(t, got, want)
+}
+
+// TestGetGitCommonDirLinkedWorktree resolves the shared git dir for a linked worktree.
+func TestGetGitCommonDirLinkedWorktree(t *testing.T) {
+	repo := initGitRepo(t)
+	runGit(t, repo, "commit", "--allow-empty", "-m", "root")
+
+	worktrees := filepath.Join(t.TempDir(), "worktrees")
+	if err := os.MkdirAll(worktrees, 0o750); err != nil {
+		t.Fatalf("mkdir worktrees: %v", err)
+	}
+	worktreeDir := filepath.Join(worktrees, "linked")
+	runGit(t, repo, "worktree", "add", worktreeDir)
+
+	got := GetGitCommonDir(worktreeDir)
+	want := filepath.Join(repo, ".git")
+	samePath(t, got, want)
+}

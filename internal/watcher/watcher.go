@@ -1,7 +1,10 @@
 package watcher
 
 import (
+	"fmt"
+	"io"
 	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -13,9 +16,10 @@ import (
 
 // FileWatcher watches the repo worktree and real git dir for changes.
 type FileWatcher struct {
-	fsw     *fsnotify.Watcher
-	repoDir string
-	gitDir  string
+	fsw          *fsnotify.Watcher
+	repoDir      string
+	gitDir       string
+	commonGitDir string
 
 	onChange func(changedPaths []string)
 	onHead   func()
@@ -27,24 +31,27 @@ type FileWatcher struct {
 	pendingPaths []string
 	pendingSeen  map[string]bool
 
-	done chan struct{}
+	done      chan struct{}
+	errWriter io.Writer
 }
 
 // New creates and starts a file watcher for the worktree and git metadata.
-func New(repoDir, gitDir string, onChange func([]string), onHead func()) (*FileWatcher, error) {
+func New(repoDir, gitDir, commonGitDir string, onChange func([]string), onHead func()) (*FileWatcher, error) {
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
 	}
 
 	watcher := &FileWatcher{
-		fsw:         fsw,
-		repoDir:     repoDir,
-		gitDir:      gitDir,
-		onChange:    onChange,
-		onHead:      onHead,
-		pendingSeen: make(map[string]bool),
-		done:        make(chan struct{}),
+		fsw:          fsw,
+		repoDir:      repoDir,
+		gitDir:       gitDir,
+		commonGitDir: commonGitDir,
+		onChange:     onChange,
+		onHead:       onHead,
+		pendingSeen:  make(map[string]bool),
+		done:         make(chan struct{}),
+		errWriter:    os.Stderr,
 	}
 
 	watcher.debouncer = NewDebouncer(300*time.Millisecond, time.Second, func() {
@@ -67,6 +74,10 @@ func New(repoDir, gitDir string, onChange func([]string), onHead func()) (*FileW
 	}
 	refsDir := filepath.Join(gitDir, "refs")
 	watcher.addDirRecursive(refsDir)
+	if commonGitDir != "" && commonGitDir != gitDir {
+		commonRefsDir := filepath.Join(commonGitDir, "refs")
+		watcher.addDirRecursive(commonRefsDir)
+	}
 
 	go watcher.loop()
 	return watcher, nil
@@ -81,8 +92,8 @@ func (fw *FileWatcher) loop() {
 			}
 
 			path := event.Name
-			if isGitInternalPath(path, fw.gitDir) {
-				if isHeadOrRefPath(path, fw.gitDir) {
+			if isGitInternalPath(path, fw.gitDir) || isGitInternalPath(path, fw.commonGitDir) {
+				if isHeadOrRefPath(path, fw.gitDir) || isHeadOrRefPath(path, fw.commonGitDir) {
 					fw.headDebouncer.Trigger()
 				}
 				continue
@@ -111,9 +122,12 @@ func (fw *FileWatcher) loop() {
 			}
 			fw.debouncer.Trigger()
 
-		case _, ok := <-fw.fsw.Errors:
+		case err, ok := <-fw.fsw.Errors:
 			if !ok {
 				return
+			}
+			if err != nil {
+				fw.reportError(err.Error())
 			}
 		case <-fw.done:
 			return
@@ -131,11 +145,17 @@ func (fw *FileWatcher) Stop() {
 
 // isGitInternalPath returns true only for the real git internal directory tree.
 func isGitInternalPath(path, gitDir string) bool {
+	if gitDir == "" {
+		return false
+	}
 	return path == gitDir || strings.HasPrefix(path, gitDir+string(filepath.Separator))
 }
 
 // isHeadOrRefPath returns true for HEAD and refs changes that reset the baseline.
 func isHeadOrRefPath(path, gitDir string) bool {
+	if gitDir == "" {
+		return false
+	}
 	rel, err := filepath.Rel(gitDir, path)
 	if err != nil {
 		return false
@@ -155,6 +175,13 @@ func (fw *FileWatcher) isIgnored(path string) bool {
 	cmd := exec.Command("git", "check-ignore", "-q", rel)
 	cmd.Dir = fw.repoDir
 	return cmd.Run() == nil
+}
+
+func (fw *FileWatcher) reportError(message string) {
+	if fw.errWriter == nil {
+		return
+	}
+	_, _ = fmt.Fprintln(fw.errWriter, message)
 }
 
 func (fw *FileWatcher) addDirRecursive(dir string) {

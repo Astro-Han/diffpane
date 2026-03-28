@@ -4,6 +4,7 @@ import "github.com/Astro-Han/diffpane/internal"
 
 // FilesUpdatedMsg notifies the UI that the computed file list changed.
 type FilesUpdatedMsg struct {
+	BaselineSHA  string
 	Files        []internal.FileDiff
 	ChangedPaths []string
 }

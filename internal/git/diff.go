@@ -116,12 +116,21 @@ func getUntrackedDiff(repoDir string) ([]internal.FileDiff, error) {
 
 // buildNewFileDiff synthesizes an added-file diff for untracked content.
 func buildNewFileDiff(path, content string) internal.FileDiff {
+	if strings.ContainsRune(content, '\x00') {
+		return internal.FileDiff{
+			Path:     path,
+			Status:   internal.StatusBinary,
+			IsBinary: true,
+		}
+	}
+
 	lines := strings.Split(content, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+
 	var diffLines []internal.DiffLine
 	for _, line := range lines {
-		if line == "" && len(diffLines) > 0 {
-			continue
-		}
 		diffLines = append(diffLines, internal.DiffLine{
 			Type:    internal.LineAdd,
 			Content: line,

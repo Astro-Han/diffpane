@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/Astro-Han/diffpane/internal"
 )
 
 // TestComputeDiffModifiedFile verifies tracked modifications become unified diffs.
@@ -125,6 +127,68 @@ func TestComputeDiffFreshRepoUntrackedFile(t *testing.T) {
 	}
 	if len(files) != 1 || files[0].Path != "fresh.txt" {
 		t.Fatalf("expected 1 file fresh.txt, got %#v", files)
+	}
+}
+
+// TestComputeDiffUntrackedFilePreservesInnerBlankLines verifies synthetic diffs
+// keep blank lines inside file content instead of dropping them.
+func TestComputeDiffUntrackedFilePreservesInnerBlankLines(t *testing.T) {
+	root := initGitRepo(t)
+	runGit(t, root, "commit", "--allow-empty", "-m", "init")
+
+	baseline, err := GetHeadSHA(root)
+	if err != nil {
+		t.Fatalf("GetHeadSHA returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "blank.txt"), []byte("top\n\nbottom\n"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	files, err := ComputeDiff(root, baseline)
+	if err != nil {
+		t.Fatalf("ComputeDiff returned error: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	lines := files[0].Hunks[0].Lines
+	if len(lines) != 3 {
+		t.Fatalf("line count = %d, want 3", len(lines))
+	}
+	if lines[1].Content != "" {
+		t.Fatalf("middle line = %q, want blank line", lines[1].Content)
+	}
+	if files[0].AddCount != 3 {
+		t.Fatalf("add count = %d, want 3", files[0].AddCount)
+	}
+}
+
+// TestComputeDiffUntrackedBinaryFile verifies untracked binary files are not
+// rendered as text hunks.
+func TestComputeDiffUntrackedBinaryFile(t *testing.T) {
+	root := initGitRepo(t)
+	runGit(t, root, "commit", "--allow-empty", "-m", "init")
+
+	baseline, err := GetHeadSHA(root)
+	if err != nil {
+		t.Fatalf("GetHeadSHA returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "image.bin"), []byte{0x00, 0x01, 0x02}, 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	files, err := ComputeDiff(root, baseline)
+	if err != nil {
+		t.Fatalf("ComputeDiff returned error: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	if !files[0].IsBinary || files[0].Status != internal.StatusBinary {
+		t.Fatalf("expected binary status, got %#v", files[0])
+	}
+	if len(files[0].Hunks) != 0 {
+		t.Fatalf("binary file should not have text hunks, got %#v", files[0].Hunks)
 	}
 }
 
