@@ -44,7 +44,15 @@ func ComputeDiff(repoDir, baselineSHA string) ([]internal.FileDiff, error) {
 
 // getTrackedDiff reads tracked-file changes from git diff output.
 func getTrackedDiff(repoDir, baselineSHA string) ([]internal.FileDiff, error) {
-	cmd := exec.Command("git", "diff", "--no-renames", baselineSHA, "--")
+	args := []string{"diff", "--no-renames", baselineSHA, "--"}
+	if baselineSHA == EmptyTreeSHA {
+		// Fresh repos have no reachable empty-tree object yet, so compare staged files
+		// against an implicit empty tree instead of diffing by SHA.
+		args = []string{"diff", "--cached", "--no-renames", "--root", "--"}
+	}
+
+	// #nosec G204 -- git and its arguments are fixed by the application flow.
+	cmd := exec.Command("git", args...)
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
 	if err != nil {
@@ -81,6 +89,7 @@ func getUntrackedDiff(repoDir string) ([]internal.FileDiff, error) {
 				if relErr != nil {
 					return nil
 				}
+				// #nosec G304,G122 -- current comes from walking inside the repository root.
 				data, readErr := os.ReadFile(current)
 				if readErr != nil {
 					return nil
@@ -94,6 +103,7 @@ func getUntrackedDiff(repoDir string) ([]internal.FileDiff, error) {
 			continue
 		}
 
+		// #nosec G304 -- path comes from git status output scoped to the repository.
 		data, readErr := os.ReadFile(filepath.Join(repoDir, path))
 		if readErr != nil {
 			continue

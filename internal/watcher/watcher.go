@@ -62,7 +62,7 @@ func New(repoDir, gitDir string, onChange func([]string), onHead func()) (*FileW
 
 	watcher.addDirRecursive(repoDir)
 	if err := watcher.fsw.Add(gitDir); err != nil {
-		watcher.fsw.Close()
+		_ = watcher.fsw.Close()
 		return nil, err
 	}
 	refsDir := filepath.Join(gitDir, "refs")
@@ -151,6 +151,7 @@ func (fw *FileWatcher) isIgnored(path string) bool {
 		rel = computed
 	}
 
+	// #nosec G204 -- git command and checked path are scoped to the current repo.
 	cmd := exec.Command("git", "check-ignore", "-q", rel)
 	cmd.Dir = fw.repoDir
 	return cmd.Run() == nil

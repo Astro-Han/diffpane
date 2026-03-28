@@ -6,6 +6,8 @@ linters:
     - errorlint   # 错误处理规范
     - bodyclose   # HTTP 响应体必须关闭
     - revive      # 代码风格
-    - goimports   # import 排序
     - misspell    # 拼写检查
     - nolintlint  # 确保 nolint 注释有理由
+formatters:
+  enable:
+    - goimports   # import 排序

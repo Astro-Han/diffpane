@@ -1,3 +1,4 @@
+// Package main wires repository diffing, watching, and the TUI into one CLI.
 package main
 
 import (

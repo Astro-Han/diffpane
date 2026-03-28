@@ -9,7 +9,7 @@ import (
 // TestComputeDiffModifiedFile verifies tracked modifications become unified diffs.
 func TestComputeDiffModifiedFile(t *testing.T) {
 	root := initGitRepo(t)
-	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("hello\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("hello\n"), 0o600); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 	runGit(t, root, "add", ".")
@@ -19,7 +19,7 @@ func TestComputeDiffModifiedFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetHeadSHA returned error: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("hello\nworld\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("hello\nworld\n"), 0o600); err != nil {
 		t.Fatalf("rewrite file: %v", err)
 	}
 
@@ -44,7 +44,7 @@ func TestComputeDiffUntrackedFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetHeadSHA returned error: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "new.txt"), []byte("a\nb\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "new.txt"), []byte("a\nb\n"), 0o600); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 
@@ -70,13 +70,13 @@ func TestComputeDiffUntrackedDirectory(t *testing.T) {
 		t.Fatalf("GetHeadSHA returned error: %v", err)
 	}
 
-	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o750); err != nil {
 		t.Fatalf("mkdir src: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "src", "a.go"), []byte("package src\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "src", "a.go"), []byte("package src\n"), 0o600); err != nil {
 		t.Fatalf("write a.go: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "src", "b.go"), []byte("package src\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "src", "b.go"), []byte("package src\n"), 0o600); err != nil {
 		t.Fatalf("write b.go: %v", err)
 	}
 
@@ -86,6 +86,45 @@ func TestComputeDiffUntrackedDirectory(t *testing.T) {
 	}
 	if len(files) != 2 {
 		t.Fatalf("expected 2 files, got %d", len(files))
+	}
+}
+
+// TestComputeDiffFreshRepoNoChanges verifies an unborn repo can render the empty state.
+func TestComputeDiffFreshRepoNoChanges(t *testing.T) {
+	root := initGitRepo(t)
+
+	baseline, err := GetHeadSHA(root)
+	if err != nil {
+		t.Fatalf("GetHeadSHA returned error: %v", err)
+	}
+
+	files, err := ComputeDiff(root, baseline)
+	if err != nil {
+		t.Fatalf("ComputeDiff returned error: %v", err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("expected 0 files, got %d", len(files))
+	}
+}
+
+// TestComputeDiffFreshRepoUntrackedFile verifies fresh repos still show untracked files.
+func TestComputeDiffFreshRepoUntrackedFile(t *testing.T) {
+	root := initGitRepo(t)
+
+	baseline, err := GetHeadSHA(root)
+	if err != nil {
+		t.Fatalf("GetHeadSHA returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "fresh.txt"), []byte("hello\n"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	files, err := ComputeDiff(root, baseline)
+	if err != nil {
+		t.Fatalf("ComputeDiff returned error: %v", err)
+	}
+	if len(files) != 1 || files[0].Path != "fresh.txt" {
+		t.Fatalf("expected 1 file fresh.txt, got %#v", files)
 	}
 }
 

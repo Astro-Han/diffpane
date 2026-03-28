@@ -40,6 +40,7 @@ func initGitRepo(t *testing.T) string {
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 
+	// #nosec G204 -- tests invoke git with controlled fixture inputs.
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
@@ -55,7 +56,7 @@ func commitFile(t *testing.T, root, name, content string) string {
 	t.Helper()
 
 	path := filepath.Join(root, name)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 
@@ -70,7 +71,7 @@ func commitFile(t *testing.T, root, name, content string) string {
 func TestFindWorktreeRootInGitRepo(t *testing.T) {
 	root := initGitRepo(t)
 	nested := filepath.Join(root, "a", "b")
-	if err := os.MkdirAll(nested, 0o755); err != nil {
+	if err := os.MkdirAll(nested, 0o750); err != nil {
 		t.Fatalf("mkdir nested: %v", err)
 	}
 
@@ -124,7 +125,7 @@ func TestGetHeadSHAHeadRefError(t *testing.T) {
 	commitFile(t, root, "README.md", "hello\n")
 
 	headPath := filepath.Join(root, ".git", "HEAD")
-	if err := os.WriteFile(headPath, []byte("ref: refs/heads/missing\n"), 0o644); err != nil {
+	if err := os.WriteFile(headPath, []byte("ref: refs/heads/missing\n"), 0o600); err != nil {
 		t.Fatalf("write HEAD: %v", err)
 	}
 
@@ -149,7 +150,7 @@ func TestResolveGitDirLinkedWorktree(t *testing.T) {
 	runGit(t, repo, "commit", "--allow-empty", "-m", "root")
 
 	worktrees := filepath.Join(t.TempDir(), "worktrees")
-	if err := os.MkdirAll(worktrees, 0o755); err != nil {
+	if err := os.MkdirAll(worktrees, 0o750); err != nil {
 		t.Fatalf("mkdir worktrees: %v", err)
 	}
 	worktreeDir := filepath.Join(worktrees, "linked")

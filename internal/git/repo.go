@@ -69,6 +69,7 @@ func ResolveGitDir(repoDir string) string {
 		return gitPath
 	}
 
+	// #nosec G304 -- gitPath is always repoDir/.git for the current repository.
 	data, err := os.ReadFile(gitPath)
 	if err != nil {
 		return ""
@@ -92,6 +93,7 @@ func ResolveGitDir(repoDir string) string {
 
 // gitOutput runs git in dir and returns stdout.
 func gitOutput(dir string, args ...string) (string, error) {
+	// #nosec G204 -- git is fixed and arguments are constructed by trusted callers.
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

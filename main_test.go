@@ -12,6 +12,7 @@ import (
 func TestMainNotGitRepoExitsWithCodeOne(t *testing.T) {
 	dir := t.TempDir()
 
+	// #nosec G204,G702 -- tests execute the current test binary with controlled args.
 	cmd := exec.Command(os.Args[0], "-test.run=TestMainHelperProcess", "--", dir)
 	cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
 	out, err := cmd.CombinedOutput()
@@ -32,7 +33,7 @@ func TestMainNotGitRepoExitsWithCodeOne(t *testing.T) {
 }
 
 // TestMainHelperProcess runs main in a subprocess so os.Exit terminates only the child.
-func TestMainHelperProcess(t *testing.T) {
+func TestMainHelperProcess(_ *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
 		return
 	}
