@@ -1,0 +1,29 @@
+version: 2
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s
+      - -w
+
+brews:
+  - repository:
+      owner: Astro-Han
+      name: homebrew-tap
+    homepage: https://github.com/Astro-Han/diffpane
+    description: Real-time TUI diff viewer for AI coding agents
+    license: MIT
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  github:
+    owner: Astro-Han
+    name: diffpane

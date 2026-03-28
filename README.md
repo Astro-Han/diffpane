@@ -2,14 +2,7 @@
 
 Real-time TUI diff viewer for AI coding agents.
 
-Split your terminal. Left: your AI agent. Right: `diffpane` showing every change as it happens.
-
-## Features
-
-- **Live diff** — watches your git worktree and shows changes in real time
-- **Session baseline** — records HEAD at startup, auto-resets on commit
-- **Follow mode** — auto-jumps to the latest changed file (on by default)
-- **Zero dependencies** — single binary, `brew install` and go
+Watch what your AI agent is changing, in real-time, right next to your terminal.
 
 ## Install
 
@@ -26,23 +19,21 @@ cd your-project
 diffpane
 ```
 
+Split your terminal. Left: run your AI agent. Right: `diffpane` shows what changed.
+
 ## Keys
 
 | Key | Action |
 |-----|--------|
-| `j` / `k` | Scroll diff |
-| `n` / `p` | Next / previous file |
+| `j`/`k` | Scroll diff |
+| `n`/`p` | Next/prev file |
 | `f` | Toggle follow mode |
 | `Tab` | File list |
 | `q` | Quit |
 
 ## How it works
 
-`diffpane` records your current `git HEAD` when it starts (the "baseline"). It watches for file changes and shows a live unified diff of everything that changed since the baseline. When you `git commit`, the baseline auto-resets so you only see new changes.
-
-## Status
-
-Under development. Not yet functional.
+diffpane records your current git HEAD when it starts (the "baseline"). It watches for file changes and shows you a live diff of everything that changed since the baseline. When you `git commit`, the baseline auto-resets so you only see new changes.
 
 ## License
 
