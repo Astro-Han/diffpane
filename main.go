@@ -28,8 +28,8 @@ func main() {
 
 	root, err := gitpkg.FindWorktreeRoot(cwd)
 	if err != nil {
-		fmt.Println("Not a git repository. Run `git init` to get started.")
-		os.Exit(1)
+		fmt.Println("Not a git repository. Run git init to get started.")
+		return
 	}
 
 	sha, err := gitpkg.GetHeadSHA(root)

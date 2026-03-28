@@ -9,7 +9,7 @@ import (
 
 // TestRenderHeaderEmpty verifies the empty state header shows directory and watching state.
 func TestRenderHeaderEmpty(t *testing.T) {
-	header := RenderHeader("myproject", nil, 0, 0)
+	header := RenderHeader("myproject", nil, 0, 0, 80)
 	if !strings.Contains(header, "myproject") || !strings.Contains(header, "watching") {
 		t.Fatalf("header = %q, want dir name and watching", header)
 	}
@@ -18,7 +18,7 @@ func TestRenderHeaderEmpty(t *testing.T) {
 // TestRenderHeaderSingleFile verifies one file does not show the file counter.
 func TestRenderHeaderSingleFile(t *testing.T) {
 	files := []internal.FileDiff{{Path: "src/auth.ts", AddCount: 3, DelCount: 1}}
-	header := RenderHeader("myproject", files, 0, 0)
+	header := RenderHeader("myproject", files, 0, 0, 80)
 	if strings.Contains(header, "›") {
 		t.Fatalf("single file header should not show counter, got %q", header)
 	}
@@ -30,7 +30,7 @@ func TestRenderHeaderMultipleFiles(t *testing.T) {
 		{Path: "src/auth.ts", AddCount: 3},
 		{Path: "src/utils.ts", AddCount: 1},
 	}
-	header := RenderHeader("myproject", files, 0, 0)
+	header := RenderHeader("myproject", files, 0, 0, 80)
 	if !strings.Contains(header, "1/2") {
 		t.Fatalf("header = %q, want counter 1/2", header)
 	}
@@ -39,7 +39,7 @@ func TestRenderHeaderMultipleFiles(t *testing.T) {
 // TestRenderHeaderNewCount verifies paused follow mode shows the pending new count.
 func TestRenderHeaderNewCount(t *testing.T) {
 	files := []internal.FileDiff{{Path: "a.ts", AddCount: 1}}
-	header := RenderHeader("myproject", files, 0, 3)
+	header := RenderHeader("myproject", files, 0, 3, 80)
 	if !strings.Contains(header, "+3 new") {
 		t.Fatalf("header = %q, want +3 new", header)
 	}
@@ -55,7 +55,7 @@ func TestRenderHeaderOutOfRangeIndex(t *testing.T) {
 		}
 	}()
 
-	header := RenderHeader("myproject", files, 9, 0)
+	header := RenderHeader("myproject", files, 9, 0, 80)
 	if !strings.Contains(header, "a.ts") {
 		t.Fatalf("header = %q, want file path", header)
 	}

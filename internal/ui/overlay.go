@@ -8,9 +8,9 @@ import (
 )
 
 // RenderOverlay renders the frozen file list overlay.
-func RenderOverlay(files []internal.FileDiff, cursor, height int) string {
+func RenderOverlay(files []internal.FileDiff, cursor, height, width int) string {
 	if len(files) == 0 {
-		return StyleDim.Render("No changed files")
+		return clampInlineWidth(StyleDim.Render("No changed files"), width)
 	}
 
 	var lines []string
@@ -29,6 +29,9 @@ func RenderOverlay(files []internal.FileDiff, cursor, height int) string {
 	end := start + height
 	if end > len(lines) {
 		end = len(lines)
+	}
+	for i := start; i < end; i++ {
+		lines[i] = clampInlineWidth(lines[i], width)
 	}
 	return strings.Join(lines[start:end], "\n")
 }

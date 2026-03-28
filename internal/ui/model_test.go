@@ -6,6 +6,7 @@ import (
 
 	"github.com/Astro-Han/diffpane/internal"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func file(path string, adds int) internal.FileDiff {
@@ -88,6 +89,31 @@ func TestModelPausedFollowTracksNewFiles(t *testing.T) {
 	}
 	if !got.NewFiles["c.txt"] {
 		t.Fatal("expected c.txt to be tracked as new")
+	}
+}
+
+// TestModelPausedFollowIgnoresVanishedChangedPaths verifies transient changes
+// that disappear before the diff refresh lands do not inflate +N new.
+func TestModelPausedFollowIgnoresVanishedChangedPaths(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		file("a.txt", 1),
+	})
+	model.FollowOn = false
+	model.CurrentIdx = 0
+
+	updated, _ := model.Update(FilesUpdatedMsg{
+		Files: []internal.FileDiff{
+			file("a.txt", 1),
+		},
+		ChangedPaths: []string{"temp.txt"},
+	})
+
+	got := updated.(Model)
+	if got.NewCount != 0 {
+		t.Fatalf("NewCount = %d, want 0", got.NewCount)
+	}
+	if len(got.NewFiles) != 0 {
+		t.Fatalf("NewFiles = %#v, want empty", got.NewFiles)
 	}
 }
 
@@ -281,6 +307,40 @@ func TestModelFollowClampsWhenCurrentFileDisappears(t *testing.T) {
 	}
 }
 
+// TestModelOverlayAppliesFreshUpdateAfterBaselineReset verifies a newer
+// baseline refresh still lands after overlay close, even if an old update was
+// queued earlier in the same overlay session.
+func TestModelOverlayAppliesFreshUpdateAfterBaselineReset(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "old-sha", []internal.FileDiff{
+		file("old.txt", 1),
+	})
+
+	opened, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	withOverlay := opened.(Model)
+
+	queuedOld, _ := withOverlay.Update(FilesUpdatedMsg{
+		BaselineSHA: "old-sha",
+		Files: []internal.FileDiff{
+			file("stale.txt", 1),
+		},
+		ChangedPaths: []string{"stale.txt"},
+	})
+	reset, _ := queuedOld.(Model).Update(BaselineResetMsg{NewSHA: "new-sha"})
+	queuedNew, _ := reset.(Model).Update(FilesUpdatedMsg{
+		BaselineSHA: "new-sha",
+		Files: []internal.FileDiff{
+			file("fresh.txt", 1),
+		},
+		ChangedPaths: []string{"fresh.txt"},
+	})
+	closed, _ := queuedNew.(Model).Update(tea.KeyMsg{Type: tea.KeyEsc})
+	got := closed.(Model)
+
+	if len(got.Files) != 1 || got.Files[0].Path != "fresh.txt" {
+		t.Fatalf("fresh overlay update should win after reset, got %#v", got.Files)
+	}
+}
+
 // TestModelViewSmallHeightDoesNotPanic verifies tiny terminal heights do not
 // trigger negative content heights in overlay rendering.
 func TestModelViewSmallHeightDoesNotPanic(t *testing.T) {
@@ -318,6 +378,54 @@ func TestModelViewEmptyStateFitsViewport(t *testing.T) {
 	}
 	if !strings.Contains(lines[3], "q quit") {
 		t.Fatalf("last line = %q, want footer", lines[3])
+	}
+}
+
+// TestModelViewNarrowWidthKeepsChromeSingleLine verifies header and footer stay
+// within the viewport width instead of relying on terminal soft-wrap.
+func TestModelViewNarrowWidthKeepsChromeSingleLine(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{{
+		Path:     "very/long/path/to/current-file-name.ts",
+		AddCount: 12,
+		DelCount: 3,
+	}})
+	model.Width = 20
+	model.Height = 4
+
+	view := model.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) != 4 {
+		t.Fatalf("line count = %d, want 4; view = %q", len(lines), view)
+	}
+	if lipgloss.Width(lines[0]) > model.Width {
+		t.Fatalf("header width = %d, want <= %d; header = %q", lipgloss.Width(lines[0]), model.Width, lines[0])
+	}
+	if lipgloss.Width(lines[3]) > model.Width {
+		t.Fatalf("footer width = %d, want <= %d; footer = %q", lipgloss.Width(lines[3]), model.Width, lines[3])
+	}
+}
+
+// TestModelOverlayNarrowWidthKeepsEntriesSingleLine verifies overlay rows fit
+// the viewport width instead of depending on soft-wrap.
+func TestModelOverlayNarrowWidthKeepsEntriesSingleLine(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		{Path: "very/long/path/to/current-file-name.ts", AddCount: 12, DelCount: 3},
+		{Path: "another/extremely/long/path/to/second-file.ts", AddCount: 1},
+	})
+	model.Width = 20
+	model.Height = 4
+	model.OverlayOpen = true
+	model.OverlaySnapshot = append([]internal.FileDiff(nil), model.Files...)
+
+	view := model.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) != 4 {
+		t.Fatalf("line count = %d, want 4; view = %q", len(lines), view)
+	}
+	for i := 1; i <= 2; i++ {
+		if lipgloss.Width(lines[i]) > model.Width {
+			t.Fatalf("overlay line %d width = %d, want <= %d; line = %q", i, lipgloss.Width(lines[i]), model.Width, lines[i])
+		}
 	}
 }
 

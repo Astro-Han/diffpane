@@ -130,6 +130,39 @@ func TestComputeDiffFreshRepoUntrackedFile(t *testing.T) {
 	}
 }
 
+// TestComputeDiffFreshRepoStagedThenModifiedFile verifies an unborn repo shows
+// the current worktree content even after a file was staged earlier.
+func TestComputeDiffFreshRepoStagedThenModifiedFile(t *testing.T) {
+	root := initGitRepo(t)
+
+	baseline, err := GetHeadSHA(root)
+	if err != nil {
+		t.Fatalf("GetHeadSHA returned error: %v", err)
+	}
+	path := filepath.Join(root, "fresh.txt")
+	if err := os.WriteFile(path, []byte("a\n"), 0o600); err != nil {
+		t.Fatalf("write staged file: %v", err)
+	}
+	runGit(t, root, "add", "fresh.txt")
+	if err := os.WriteFile(path, []byte("b\n"), 0o600); err != nil {
+		t.Fatalf("rewrite worktree file: %v", err)
+	}
+
+	files, err := ComputeDiff(root, baseline)
+	if err != nil {
+		t.Fatalf("ComputeDiff returned error: %v", err)
+	}
+	if len(files) != 1 || files[0].Path != "fresh.txt" {
+		t.Fatalf("expected 1 file fresh.txt, got %#v", files)
+	}
+	if len(files[0].Hunks) != 1 || len(files[0].Hunks[0].Lines) != 1 {
+		t.Fatalf("unexpected hunks: %#v", files[0].Hunks)
+	}
+	if files[0].Hunks[0].Lines[0].Content != "b" {
+		t.Fatalf("line content = %q, want current worktree content", files[0].Hunks[0].Lines[0].Content)
+	}
+}
+
 // TestComputeDiffUntrackedFilePreservesInnerBlankLines verifies synthetic diffs
 // keep blank lines inside file content instead of dropping them.
 func TestComputeDiffUntrackedFilePreservesInnerBlankLines(t *testing.T) {
