@@ -64,6 +64,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Notification = "baseline reset"
 		m.NewCount = 0
 		m.NewFiles = make(map[string]bool)
+		m.LastChangedPath = ""
 		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 			return ClearNotificationMsg{}
 		})
@@ -107,19 +108,38 @@ func (m Model) applyFilesUpdate(msg FilesUpdatedMsg) Model {
 	m.Files = msg.Files
 
 	if m.FollowOn && len(m.Files) > 0 {
-		target := len(m.Files) - 1
+		// Try to follow the most recently changed file that still exists in the list.
+		target := -1
+	findTarget:
 		for i := len(msg.ChangedPaths) - 1; i >= 0; i-- {
-			changedPath := msg.ChangedPaths[i]
 			for j, file := range m.Files {
-				if file.Path == changedPath {
+				if file.Path == msg.ChangedPaths[i] {
 					target = j
-					goto followTargetFound
+					break findTarget
 				}
 			}
 		}
-	followTargetFound:
-		m.CurrentIdx = target
-		m.ScrollOffset = 0
+		if target >= 0 {
+			m.CurrentIdx = target
+			m.ScrollOffset = 0
+		} else {
+			// No changed file matched; try to stay on the current file.
+			anchored := false
+			for i, file := range m.Files {
+				if file.Path == currentPath {
+					m.CurrentIdx = i
+					anchored = true
+					break
+				}
+			}
+			if !anchored {
+				// Current file disappeared; clamp to adjacent position.
+				if m.CurrentIdx >= len(m.Files) {
+					m.CurrentIdx = len(m.Files) - 1
+				}
+				m.ScrollOffset = 0
+			}
+		}
 		m.NewFiles = make(map[string]bool)
 		m.LastChangedPath = ""
 		m.NewCount = 0

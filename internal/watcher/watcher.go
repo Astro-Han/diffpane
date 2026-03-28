@@ -165,6 +165,8 @@ func isHeadOrRefPath(path, gitDir string) bool {
 }
 
 // isIgnored checks whether git would ignore this path.
+// TODO(v2): forks a git process per event; consider caching .gitignore rules
+// or using an in-process ignore matcher to reduce overhead under high-frequency writes.
 func (fw *FileWatcher) isIgnored(path string) bool {
 	rel := path
 	if computed, err := filepath.Rel(fw.repoDir, path); err == nil {

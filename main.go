@@ -124,5 +124,16 @@ func sendBaselineReset(stderr io.Writer, sender messageSender, root, newSHA stri
 	// Bubble Tea preserves send order, so the reset lands before the fresh diff
 	// recomputation for the new baseline.
 	sender.Send(ui.BaselineResetMsg{NewSHA: newSHA})
-	sendFilesUpdated(stderr, sender, root, newSHA, nil)
+
+	newFiles, computeErr := gitpkg.ComputeDiff(root, newSHA)
+	if computeErr != nil {
+		_, _ = fmt.Fprintf(stderr, "Error computing diff: %v\n", computeErr)
+		// Clear stale files so the UI does not show diffs from the old baseline.
+		sender.Send(ui.FilesUpdatedMsg{BaselineSHA: newSHA})
+		return
+	}
+	sender.Send(ui.FilesUpdatedMsg{
+		BaselineSHA: newSHA,
+		Files:       newFiles,
+	})
 }

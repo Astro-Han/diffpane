@@ -230,6 +230,57 @@ func TestModelDropsQueuedOverlayUpdateAfterBaselineReset(t *testing.T) {
 	}
 }
 
+// TestModelFollowAnchorsWhenPrecedingFilesDisappear verifies that follow mode
+// keeps the current file selected when earlier files are removed from the list.
+func TestModelFollowAnchorsWhenPrecedingFilesDisappear(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		file("a.txt", 1),
+		file("b.txt", 1),
+		file("c.txt", 1),
+		file("d.txt", 1),
+	})
+	model.CurrentIdx = 2 // viewing c.txt
+
+	updated, _ := model.Update(FilesUpdatedMsg{
+		Files: []internal.FileDiff{
+			file("b.txt", 1),
+			file("c.txt", 1),
+			file("d.txt", 1),
+		},
+		ChangedPaths: []string{"a.txt"}, // reverted, no longer in list
+	})
+
+	got := updated.(Model)
+	if got.CurrentIdx != 1 || got.Files[got.CurrentIdx].Path != "c.txt" {
+		t.Fatalf("CurrentIdx = %d (%s), want 1 (c.txt)", got.CurrentIdx, got.Files[got.CurrentIdx].Path)
+	}
+}
+
+// TestModelFollowClampsWhenCurrentFileDisappears verifies that follow mode
+// selects the adjacent file when the currently viewed file is reverted.
+func TestModelFollowClampsWhenCurrentFileDisappears(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		file("a.txt", 1),
+		file("b.txt", 1),
+		file("c.txt", 1),
+	})
+	model.CurrentIdx = 2 // viewing c.txt
+
+	updated, _ := model.Update(FilesUpdatedMsg{
+		Files: []internal.FileDiff{
+			file("a.txt", 1),
+			file("b.txt", 1),
+		},
+		ChangedPaths: []string{"c.txt"}, // reverted, gone
+	})
+
+	got := updated.(Model)
+	// Old CurrentIdx was 2, list now has 2 items, clamp to 1 (b.txt).
+	if got.CurrentIdx != 1 {
+		t.Fatalf("CurrentIdx = %d, want 1", got.CurrentIdx)
+	}
+}
+
 // TestModelViewSmallHeightDoesNotPanic verifies tiny terminal heights do not
 // trigger negative content heights in overlay rendering.
 func TestModelViewSmallHeightDoesNotPanic(t *testing.T) {

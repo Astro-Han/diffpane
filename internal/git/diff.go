@@ -62,6 +62,8 @@ func getTrackedDiff(repoDir, baselineSHA string) ([]internal.FileDiff, error) {
 }
 
 // getUntrackedDiff expands untracked files and directories to synthetic added diffs.
+// TODO(v2): reads entire file into memory; consider capping read size for large
+// generated files and delegating binary detection to git.
 func getUntrackedDiff(repoDir string) ([]internal.FileDiff, error) {
 	cmd := exec.Command("git", "status", "--porcelain", "-z", "--untracked-files=all")
 	cmd.Dir = repoDir
