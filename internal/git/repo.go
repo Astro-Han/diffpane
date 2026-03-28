@@ -34,7 +34,13 @@ func GetHeadSHA(repoDir string) (string, error) {
 		return strings.TrimSpace(out), nil
 	}
 
-	return EmptyTreeSHA, nil
+	// Empty repos have no reachable commits from any ref yet.
+	allCommits, listErr := gitOutput(root, "rev-list", "--max-count=1", "--all")
+	if listErr == nil && strings.TrimSpace(allCommits) == "" {
+		return EmptyTreeSHA, nil
+	}
+
+	return "", err
 }
 
 // GetBranchName returns the current branch name, or an empty string when detached.

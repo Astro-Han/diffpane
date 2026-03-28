@@ -118,6 +118,22 @@ func TestGetHeadSHAEmptyRepo(t *testing.T) {
 	}
 }
 
+// TestGetHeadSHAHeadRefError returns an error when HEAD points to a missing ref.
+func TestGetHeadSHAHeadRefError(t *testing.T) {
+	root := initGitRepo(t)
+	commitFile(t, root, "README.md", "hello\n")
+
+	headPath := filepath.Join(root, ".git", "HEAD")
+	if err := os.WriteFile(headPath, []byte("ref: refs/heads/missing\n"), 0o644); err != nil {
+		t.Fatalf("write HEAD: %v", err)
+	}
+
+	_, err := GetHeadSHA(root)
+	if err == nil {
+		t.Fatal("GetHeadSHA returned nil error, want failure for broken HEAD ref")
+	}
+}
+
 // TestResolveGitDirNormalRepo resolves .git inside a standard repo.
 func TestResolveGitDirNormalRepo(t *testing.T) {
 	root := initGitRepo(t)
