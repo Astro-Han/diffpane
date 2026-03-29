@@ -1,10 +1,16 @@
 package git
 
 import (
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/Astro-Han/diffpane/internal"
 )
+
+// hunkHeaderRe extracts the new-file start line from a unified diff hunk header.
+// The count after the comma is optional when git omits a value of 1.
+var hunkHeaderRe = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
 
 // ParseDiff parses unified git diff output into file-level diff data.
 func ParseDiff(raw string) []internal.FileDiff {
@@ -70,7 +76,14 @@ func ParseDiff(raw string) []internal.FileDiff {
 			// Skip metadata lines that do not belong to hunk content.
 		case strings.HasPrefix(line, "@@"):
 			flushHunk()
-			hunk = &internal.DiffHunk{Header: line}
+			startLine := 0
+			if match := hunkHeaderRe.FindStringSubmatch(line); match != nil {
+				startLine, _ = strconv.Atoi(match[1])
+			}
+			hunk = &internal.DiffHunk{
+				Header:    line,
+				StartLine: startLine,
+			}
 		default:
 			if hunk == nil {
 				continue

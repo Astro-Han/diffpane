@@ -45,6 +45,9 @@ index abc1234..def5678 100644
 	if len(file.Hunks) != 1 {
 		t.Fatalf("hunk count = %d, want 1", len(file.Hunks))
 	}
+	if file.Hunks[0].StartLine != 47 {
+		t.Fatalf("StartLine = %d, want 47", file.Hunks[0].StartLine)
+	}
 }
 
 func TestParseDiffBinary(t *testing.T) {
@@ -96,10 +99,72 @@ diff --git a/b.txt b/b.txt
 	if len(files) != 2 {
 		t.Fatalf("expected 2 files, got %d", len(files))
 	}
+	if files[0].Hunks[0].StartLine != 1 {
+		t.Fatalf("file[0] StartLine = %d, want 1", files[0].Hunks[0].StartLine)
+	}
+	if files[1].Hunks[0].StartLine != 1 {
+		t.Fatalf("file[1] StartLine = %d, want 1", files[1].Hunks[0].StartLine)
+	}
 }
 
 func TestParseDiffEmpty(t *testing.T) {
 	if files := ParseDiff(""); len(files) != 0 {
 		t.Fatalf("expected 0 files, got %d", len(files))
+	}
+}
+
+func TestParseDiffStartLineAbbreviated(t *testing.T) {
+	input := `diff --git a/a.txt b/a.txt
+--- a/a.txt
++++ b/a.txt
+@@ -1 +1,2 @@
+ hello
++world
+`
+	files := ParseDiff(input)
+	if files[0].Hunks[0].StartLine != 1 {
+		t.Fatalf("StartLine = %d, want 1", files[0].Hunks[0].StartLine)
+	}
+}
+
+func TestParseDiffStartLineBothAbbreviated(t *testing.T) {
+	input := `diff --git a/b.txt b/b.txt
+--- a/b.txt
++++ b/b.txt
+@@ -1 +1 @@
+-old
++new
+`
+	files := ParseDiff(input)
+	if files[0].Hunks[0].StartLine != 1 {
+		t.Fatalf("StartLine = %d, want 1", files[0].Hunks[0].StartLine)
+	}
+}
+
+func TestParseDiffStartLineDeleted(t *testing.T) {
+	input := `diff --git a/old.txt b/old.txt
+deleted file mode 100644
+--- a/old.txt
++++ /dev/null
+@@ -1,2 +0,0 @@
+-line1
+-line2
+`
+	files := ParseDiff(input)
+	if files[0].Hunks[0].StartLine != 0 {
+		t.Fatalf("StartLine = %d, want 0", files[0].Hunks[0].StartLine)
+	}
+}
+
+func TestParseDiffStartLineMalformed(t *testing.T) {
+	input := `diff --git a/x.txt b/x.txt
+--- a/x.txt
++++ b/x.txt
+@@ broken header @@
++added line
+`
+	files := ParseDiff(input)
+	if files[0].Hunks[0].StartLine != 0 {
+		t.Fatalf("StartLine = %d, want 0", files[0].Hunks[0].StartLine)
 	}
 }
