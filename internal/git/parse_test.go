@@ -141,6 +141,38 @@ func TestParseDiffStartLineBothAbbreviated(t *testing.T) {
 	}
 }
 
+// TestParseDiffStartLineAbbreviatedNonOne verifies abbreviated headers keep
+// non-1 new-file start lines.
+func TestParseDiffStartLineAbbreviatedNonOne(t *testing.T) {
+	input := `diff --git a/c.txt b/c.txt
+--- a/c.txt
++++ b/c.txt
+@@ -1 +38 @@
+-old
++new
+`
+	files := ParseDiff(input)
+	if files[0].Hunks[0].StartLine != 38 {
+		t.Fatalf("StartLine = %d, want 38", files[0].Hunks[0].StartLine)
+	}
+}
+
+// TestParseDiffStartLineWithSectionHeading verifies function-context suffixes
+// do not interfere with start-line parsing.
+func TestParseDiffStartLineWithSectionHeading(t *testing.T) {
+	input := `diff --git a/handler.go b/handler.go
+--- a/handler.go
++++ b/handler.go
+@@ -10,2 +38,3 @@ func renderHeader() {
+ line1
++line2
+`
+	files := ParseDiff(input)
+	if files[0].Hunks[0].StartLine != 38 {
+		t.Fatalf("StartLine = %d, want 38", files[0].Hunks[0].StartLine)
+	}
+}
+
 func TestParseDiffStartLineDeleted(t *testing.T) {
 	input := `diff --git a/old.txt b/old.txt
 deleted file mode 100644
