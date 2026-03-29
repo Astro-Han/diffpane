@@ -19,7 +19,7 @@ func TestRenderHeaderEmpty(t *testing.T) {
 func TestRenderHeaderSingleFile(t *testing.T) {
 	files := []internal.FileDiff{{Path: "src/auth.ts", AddCount: 3, DelCount: 1}}
 	header := RenderHeader("myproject", files, 0, 0, 80)
-	if strings.Contains(header, "›") {
+	if strings.Contains(header, "1/1") {
 		t.Fatalf("single file header should not show counter, got %q", header)
 	}
 }

@@ -8,6 +8,8 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
+const terminalTabStop = 8
+
 // RenderDiffView renders the current file diff within the viewport.
 func RenderDiffView(file *internal.FileDiff, scrollOffset, width, height int) string {
 	lines := diffDisplayLines(file, width)
@@ -98,6 +100,8 @@ func wrapLine(line string, width int) string {
 
 // wrapLineParts wraps one rendered line into visual lines by terminal cell width.
 func wrapLineParts(line string, width int) []string {
+	line = expandTabs(line)
+
 	if width <= 0 || runewidth.StringWidth(line) <= width {
 		return []string{line}
 	}
@@ -119,6 +123,36 @@ func wrapLineParts(line string, width int) []string {
 	}
 
 	return result
+}
+
+// expandTabs replaces tab characters with spaces so width calculations match
+// how the terminal will actually lay out the rendered diff lines.
+func expandTabs(line string) string {
+	if !strings.ContainsRune(line, '\t') {
+		return line
+	}
+
+	var expanded strings.Builder
+	column := 0
+
+	for _, r := range line {
+		if r != '\t' {
+			expanded.WriteRune(r)
+			if runeWidth := runewidth.RuneWidth(r); runeWidth > 0 {
+				column += runeWidth
+			}
+			continue
+		}
+
+		spaces := terminalTabStop - (column % terminalTabStop)
+		if spaces == 0 {
+			spaces = terminalTabStop
+		}
+		expanded.WriteString(strings.Repeat(" ", spaces))
+		column += spaces
+	}
+
+	return expanded.String()
 }
 
 // truncateToWidth returns the longest prefix that fits within width cells.

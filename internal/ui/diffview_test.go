@@ -6,7 +6,43 @@ import (
 
 	"github.com/Astro-Han/diffpane/internal"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/mattn/go-runewidth"
 )
+
+// terminalRows reports how many physical terminal rows one rendered line uses
+// after stripping ANSI codes and expanding tabs to the default 8-column stops.
+func terminalRows(line string, width int) int {
+	if width <= 0 {
+		return 0
+	}
+
+	rows := 1
+	column := 0
+
+	for _, r := range ansi.Strip(line) {
+		cellWidth := runewidth.RuneWidth(r)
+		if r == '\t' {
+			cellWidth = 8 - (column % 8)
+			if cellWidth == 0 {
+				cellWidth = 8
+			}
+		}
+		if cellWidth <= 0 {
+			continue
+		}
+		if column > 0 && column+cellWidth > width {
+			rows++
+			column = 0
+			if r == '\t' {
+				cellWidth = 8
+			}
+		}
+		column += cellWidth
+	}
+
+	return rows
+}
 
 // TestWrapLineShort verifies lines shorter than the viewport stay untouched.
 func TestWrapLineShort(t *testing.T) {
@@ -196,11 +232,86 @@ func TestSeparatorLineMultiHunk(t *testing.T) {
 	lines := diffDisplayLines(file, 40)
 	separatorCount := 0
 	for _, line := range lines {
-		if strings.Contains(line, "──") {
+		if strings.Contains(ansi.Strip(line), "──") {
 			separatorCount++
 		}
 	}
 	if separatorCount != 2 {
 		t.Fatalf("expected 2 separator lines, got %d", separatorCount)
+	}
+}
+
+// TestDiffDisplayLinesTabIndentedLineFitsViewport verifies each returned visual
+// line still occupies exactly one terminal row when diff content contains tabs.
+func TestDiffDisplayLinesTabIndentedLineFitsViewport(t *testing.T) {
+	width := 24
+	file := &internal.FileDiff{
+		Path: "test.go",
+		Hunks: []internal.DiffHunk{{
+			Header: "@@ -1,1 +1,1 @@",
+			Lines: []internal.DiffLine{{
+				Type:    internal.LineAdd,
+				Content: "\t\t// fileWithHunks builds a FileDiff with textual hunks",
+			}},
+		}},
+	}
+
+	lines := diffDisplayLines(file, width)
+	for i, line := range lines {
+		if rows := terminalRows(line, width); rows != 1 {
+			t.Fatalf("line %d occupies %d terminal rows, want 1: %q", i, rows, ansi.Strip(line))
+		}
+	}
+}
+
+// TestDiffDisplayLinesTabAndCJKLineFitsViewport verifies tab expansion also
+// stays aligned when the diff line mixes tabs with double-width runes.
+func TestDiffDisplayLinesTabAndCJKLineFitsViewport(t *testing.T) {
+	width := 16
+	file := &internal.FileDiff{
+		Path: "test.go",
+		Hunks: []internal.DiffHunk{{
+			Header: "@@ -1,1 +1,1 @@",
+			Lines: []internal.DiffLine{{
+				Type:    internal.LineAdd,
+				Content: "\t中文注释\tmixed content",
+			}},
+		}},
+	}
+
+	lines := diffDisplayLines(file, width)
+	if len(lines) < 3 {
+		t.Fatalf("line count = %d, want at least 3 to exercise wrapped tab+CJK rendering", len(lines))
+	}
+	for i, line := range lines {
+		if rows := terminalRows(line, width); rows != 1 {
+			t.Fatalf("line %d occupies %d terminal rows, want 1: %q", i, rows, ansi.Strip(line))
+		}
+	}
+}
+
+// TestDiffDisplayLinesTabLineFitsNarrowViewport verifies tab-expanded content
+// still wraps into logical segments when the viewport is extremely narrow.
+func TestDiffDisplayLinesTabLineFitsNarrowViewport(t *testing.T) {
+	width := 8
+	file := &internal.FileDiff{
+		Path: "test.go",
+		Hunks: []internal.DiffHunk{{
+			Header: "@@ -1,1 +1,1 @@",
+			Lines: []internal.DiffLine{{
+				Type:    internal.LineAdd,
+				Content: "\t\tabcdefghijk",
+			}},
+		}},
+	}
+
+	lines := diffDisplayLines(file, width)
+	if len(lines) < 5 {
+		t.Fatalf("line count = %d, want at least 5 to exercise narrow multi-segment wrapping", len(lines))
+	}
+	for i, line := range lines {
+		if rows := terminalRows(line, width); rows != 1 {
+			t.Fatalf("line %d occupies %d terminal rows, want 1: %q", i, rows, ansi.Strip(line))
+		}
 	}
 }

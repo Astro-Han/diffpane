@@ -10,7 +10,7 @@ import (
 // RenderHeader renders the single-line top bar.
 func RenderHeader(dirName string, files []internal.FileDiff, currentIdx, newCount, width int) string {
 	if len(files) == 0 {
-		return clampInlineWidth(StyleDim.Render(fmt.Sprintf("%s · watching", dirName)), width)
+		return clampInlineWidth(StyleDim.Render(fmt.Sprintf("%s | watching", dirName)), width)
 	}
 
 	currentIdx = min(max(currentIdx, 0), len(files)-1)
@@ -18,7 +18,7 @@ func RenderHeader(dirName string, files []internal.FileDiff, currentIdx, newCoun
 
 	result := fmt.Sprintf("%s %s", file.Path, renderFileStats(file))
 	if len(files) > 1 {
-		result += StyleDim.Render(fmt.Sprintf(" ‹ %d/%d ›", currentIdx+1, len(files)))
+		result += StyleDim.Render(fmt.Sprintf(" < %d/%d >", currentIdx+1, len(files)))
 	}
 	if newCount > 0 {
 		result += "  " + StyleAdd.Render(fmt.Sprintf("+%d new", newCount))
