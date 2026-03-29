@@ -139,10 +139,6 @@ func handleHeadChange(
 
 	state.mu.Lock()
 	changed := newSHA != state.lastHeadSHA || newBranch != state.branch
-	if changed {
-		state.lastHeadSHA = newSHA
-		state.branch = newBranch
-	}
 	currentBaseline := state.baseline
 	state.mu.Unlock()
 
@@ -150,11 +146,18 @@ func handleHeadChange(
 		return
 	}
 
-	sendFilesUpdatedWithCompute(stderr, sender, root, currentBaseline, nil, computeDiff)
+	if !sendFilesUpdatedWithCompute(stderr, sender, root, currentBaseline, nil, computeDiff) {
+		return
+	}
+
+	state.mu.Lock()
+	state.lastHeadSHA = newSHA
+	state.branch = newBranch
+	state.mu.Unlock()
 }
 
 func sendFilesUpdated(stderr io.Writer, sender messageSender, root, baselineSHA string, changedPaths []string) {
-	sendFilesUpdatedWithCompute(stderr, sender, root, baselineSHA, changedPaths, gitpkg.ComputeDiff)
+	_ = sendFilesUpdatedWithCompute(stderr, sender, root, baselineSHA, changedPaths, gitpkg.ComputeDiff)
 }
 
 // sendFilesUpdatedWithCompute recomputes the diff for the provided baseline and
@@ -166,17 +169,18 @@ func sendFilesUpdatedWithCompute(
 	baselineSHA string,
 	changedPaths []string,
 	computeDiff computeDiffFunc,
-) {
+) bool {
 	newFiles, computeErr := computeDiff(root, baselineSHA)
 	if computeErr != nil {
 		_, _ = fmt.Fprintf(stderr, "Error computing diff: %v\n", computeErr)
-		return
+		return false
 	}
 	sender.Send(ui.FilesUpdatedMsg{
 		BaselineSHA:  baselineSHA,
 		Files:        newFiles,
 		ChangedPaths: changedPaths,
 	})
+	return true
 }
 
 // resetSessionBaseline recomputes the diff against the latest HEAD and only

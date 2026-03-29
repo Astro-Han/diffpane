@@ -23,6 +23,7 @@ type Model struct {
 	NewFiles        map[string]bool
 	LastChangedPath string
 	Notification    string
+	notificationSeq int
 
 	OverlayOpen      bool
 	OverlayCursor    int
@@ -86,8 +87,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Files:       msg.Files,
 			})
 		}
+		m.notificationSeq++
+		token := m.notificationSeq
 		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-			return ClearNotificationMsg{Expected: "baseline reset"}
+			return ClearNotificationMsg{Token: token}
 		})
 	case ManualResetFailedMsg:
 		m.resetPending = false
@@ -96,8 +99,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Error != "" {
 			m.Notification += ": " + msg.Error
 		}
+		m.notificationSeq++
+		token := m.notificationSeq
 		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-			return ClearNotificationMsg{Expected: m.Notification}
+			return ClearNotificationMsg{Token: token}
 		})
 	case ResetTimeoutMsg:
 		if m.resetPending {
@@ -106,7 +111,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case ClearNotificationMsg:
-		if msg.Expected == "" || msg.Expected == m.Notification {
+		if msg.Token == 0 || msg.Token == m.notificationSeq {
 			m.Notification = ""
 		}
 		return m, nil

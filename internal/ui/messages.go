@@ -21,9 +21,9 @@ type ManualResetFailedMsg struct {
 }
 
 // ClearNotificationMsg clears a temporary footer notification.
-// Expected must match the current Notification; stale clears are ignored.
+// Token must match the active notification generation; stale clears are ignored.
 type ClearNotificationMsg struct {
-	Expected string
+	Token int
 }
 
 // ResetTimeoutMsg cancels a pending manual baseline reset after timeout.

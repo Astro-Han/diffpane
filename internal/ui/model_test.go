@@ -699,6 +699,44 @@ func TestModelManualResetReplacesQueuedOverlayUpdate(t *testing.T) {
 	}
 }
 
+// TestModelManualResetNotificationIgnoresStaleClear verifies an older reset's
+// clear timer cannot wipe a newer reset notification with the same text.
+func TestModelManualResetNotificationIgnoresStaleClear(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "old-sha", []internal.FileDiff{
+		file("old.txt", 1),
+	})
+	model.Width = 80
+	model.Height = 24
+
+	firstReset, firstClearCmd := model.Update(ManualResetMsg{
+		NewSHA: "sha-1",
+		Files:  []internal.FileDiff{file("one.txt", 1)},
+	})
+	first := firstReset.(Model)
+	if firstClearCmd == nil {
+		t.Fatal("expected clear cmd after first reset")
+	}
+
+	secondReset, secondClearCmd := first.Update(ManualResetMsg{
+		NewSHA: "sha-2",
+		Files:  []internal.FileDiff{file("two.txt", 2)},
+	})
+	second := secondReset.(Model)
+	if secondClearCmd == nil {
+		t.Fatal("expected clear cmd after second reset")
+	}
+	if second.Notification != "baseline reset" {
+		t.Fatalf("notification = %q, want baseline reset", second.Notification)
+	}
+
+	staleClear := firstClearCmd()
+	afterStale, _ := second.Update(staleClear)
+	got := afterStale.(Model)
+	if got.Notification != "baseline reset" {
+		t.Fatalf("stale clear removed latest notification: %q", got.Notification)
+	}
+}
+
 // TestRenderFooterIncludesResetKey verifies footer shows r reset.
 func TestRenderFooterIncludesResetKey(t *testing.T) {
 	footer := RenderFooter(true, "", 80)

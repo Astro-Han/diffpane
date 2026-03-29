@@ -73,6 +73,65 @@ func TestHandleHeadChangeKeepsSessionBaseline(t *testing.T) {
 	}
 }
 
+// TestHandleHeadChangeRetriesAfterComputeFailure verifies a transient diff
+// failure does not mark the new HEAD as already handled.
+func TestHandleHeadChangeRetriesAfterComputeFailure(t *testing.T) {
+	state := &sessionBaselineState{
+		baseline:    "session-sha",
+		lastHeadSHA: "old-head",
+		branch:      "main",
+	}
+	sender := &recordingSender{}
+	stderr := &bytes.Buffer{}
+	attempts := 0
+
+	compute := func(string, string) ([]internal.FileDiff, error) {
+		attempts++
+		if attempts == 1 {
+			return nil, errors.New("boom")
+		}
+		return []internal.FileDiff{{Path: "tracked.txt", AddCount: 1}}, nil
+	}
+
+	handleHeadChange(
+		stderr,
+		sender,
+		"/tmp/repo",
+		state,
+		func(string) (string, error) { return "new-head", nil },
+		func(string) string { return "feature" },
+		compute,
+	)
+	if state.lastHeadSHA != "old-head" {
+		t.Fatalf("lastHeadSHA = %q, want unchanged after failed compute", state.lastHeadSHA)
+	}
+	if state.branch != "main" {
+		t.Fatalf("branch = %q, want unchanged after failed compute", state.branch)
+	}
+	if len(sender.msgs) != 0 {
+		t.Fatalf("msg count = %d, want 0 after failed compute", len(sender.msgs))
+	}
+
+	handleHeadChange(
+		stderr,
+		sender,
+		"/tmp/repo",
+		state,
+		func(string) (string, error) { return "new-head", nil },
+		func(string) string { return "feature" },
+		compute,
+	)
+	if state.lastHeadSHA != "new-head" {
+		t.Fatalf("lastHeadSHA = %q, want new-head after retry", state.lastHeadSHA)
+	}
+	if state.branch != "feature" {
+		t.Fatalf("branch = %q, want feature after retry", state.branch)
+	}
+	if len(sender.msgs) != 1 {
+		t.Fatalf("msg count = %d, want 1 after successful retry", len(sender.msgs))
+	}
+}
+
 // TestResetSessionBaselineUpdatesOnlyAfterSuccessfulDiff verifies manual reset
 // re-anchors to the latest HEAD only after diff computation succeeds.
 func TestResetSessionBaselineUpdatesOnlyAfterSuccessfulDiff(t *testing.T) {
