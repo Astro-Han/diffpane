@@ -639,6 +639,66 @@ func TestModelManualResetIgnoresSecondRequestWhileInFlight(t *testing.T) {
 	}
 }
 
+// TestModelManualResetReplacesQueuedOverlayUpdate verifies a reset result
+// replaces any older queued overlay update instead of merging stale paths into
+// the new baseline state.
+func TestModelManualResetReplacesQueuedOverlayUpdate(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "old-sha", []internal.FileDiff{
+		file("current.txt", 1),
+		file("stale.txt", 1),
+	})
+	model.Width = 80
+	model.Height = 24
+	model.FollowOn = false
+	model.CurrentIdx = 0
+
+	opened, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	withOverlay := opened.(Model)
+	if !withOverlay.OverlayOpen {
+		t.Fatal("expected overlay open")
+	}
+
+	queuedOld, _ := withOverlay.Update(FilesUpdatedMsg{
+		BaselineSHA: "old-sha",
+		Files: []internal.FileDiff{
+			file("current.txt", 1),
+			file("stale.txt", 1),
+		},
+		ChangedPaths: []string{"stale.txt"},
+	})
+	pendingOld := queuedOld.(Model)
+	if pendingOld.PendingUpdate == nil {
+		t.Fatal("expected old pending update")
+	}
+
+	afterReset, _ := pendingOld.Update(ManualResetMsg{
+		NewSHA: "new-sha",
+		Files:  []internal.FileDiff{file("fresh.txt", 2)},
+	})
+	pendingReset := afterReset.(Model)
+	if pendingReset.PendingUpdate == nil {
+		t.Fatal("expected reset pending update")
+	}
+	if len(pendingReset.PendingUpdate.ChangedPaths) != 0 {
+		t.Fatalf("ChangedPaths = %v, want empty after reset replacement", pendingReset.PendingUpdate.ChangedPaths)
+	}
+
+	closed, _ := pendingReset.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	got := closed.(Model)
+	if len(got.Files) != 1 || got.Files[0].Path != "fresh.txt" {
+		t.Fatalf("Files = %v, want [fresh.txt]", got.Files)
+	}
+	if got.NewCount != 0 {
+		t.Fatalf("NewCount = %d, want 0 after reset", got.NewCount)
+	}
+	if len(got.NewFiles) != 0 {
+		t.Fatalf("NewFiles = %v, want empty after reset", got.NewFiles)
+	}
+	if got.LastChangedPath != "" {
+		t.Fatalf("LastChangedPath = %q, want empty after reset", got.LastChangedPath)
+	}
+}
+
 // TestRenderFooterIncludesResetKey verifies footer shows r reset.
 func TestRenderFooterIncludesResetKey(t *testing.T) {
 	footer := RenderFooter(true, "", 80)

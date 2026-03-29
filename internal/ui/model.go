@@ -73,11 +73,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.NewCount = 0
 		m.NewFiles = make(map[string]bool)
 		m.LastChangedPath = ""
-		updated, _ := m.handleFilesUpdated(FilesUpdatedMsg{
-			BaselineSHA: msg.NewSHA,
-			Files:       msg.Files,
-		})
-		m = updated.(Model)
+		// Manual reset starts a new baseline epoch, so any queued pre-reset
+		// update must be replaced rather than merged.
+		if m.OverlayOpen {
+			m.PendingUpdate = &FilesUpdatedMsg{
+				BaselineSHA: msg.NewSHA,
+				Files:       msg.Files,
+			}
+		} else {
+			m = m.applyFilesUpdate(FilesUpdatedMsg{
+				BaselineSHA: msg.NewSHA,
+				Files:       msg.Files,
+			})
+		}
 		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 			return ClearNotificationMsg{Expected: "baseline reset"}
 		})
