@@ -77,6 +77,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 			return ClearNotificationMsg{Expected: "baseline reset"}
 		})
+	case ManualResetFailedMsg:
+		m.resetPending = false
+		m.Notification = "baseline reset failed"
+		if msg.Error != "" {
+			m.Notification += ": " + msg.Error
+		}
+		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+			return ClearNotificationMsg{Expected: m.Notification}
+		})
 	case ResetTimeoutMsg:
 		if m.resetPending {
 			m.resetPending = false
@@ -268,7 +277,7 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 			return m, func() tea.Msg {
 				newSHA, newFiles, err := resetFn()
 				if err != nil {
-					return nil
+					return ManualResetFailedMsg{Error: err.Error()}
 				}
 				return ManualResetMsg{NewSHA: newSHA, Files: newFiles}
 			}

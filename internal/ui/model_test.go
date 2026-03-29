@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -424,6 +425,105 @@ func TestModelManualResetToEmptyFiles(t *testing.T) {
 	}
 	if got.CurrentIdx != 0 {
 		t.Fatalf("CurrentIdx = %d, want 0", got.CurrentIdx)
+	}
+}
+
+// TestModelManualResetFailureShowsNotification verifies reset errors surface a
+// temporary footer notification instead of failing silently.
+func TestModelManualResetFailureShowsNotification(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "old-sha", []internal.FileDiff{
+		file("old.txt", 1),
+	})
+	model.Width = 80
+	model.Height = 24
+	model.ResetBaseline = func() (string, []internal.FileDiff, error) {
+		return "", nil, errors.New("boom")
+	}
+
+	first, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	second, cmd := first.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m := second.(Model)
+	if cmd == nil {
+		t.Fatal("expected non-nil Cmd from second r press")
+	}
+
+	msg := cmd()
+	failed, ok := msg.(ManualResetFailedMsg)
+	if !ok {
+		t.Fatalf("message type = %T, want ManualResetFailedMsg", msg)
+	}
+	if failed.Error != "boom" {
+		t.Fatalf("error = %q, want boom", failed.Error)
+	}
+
+	afterFailure, _ := m.Update(failed)
+	got := afterFailure.(Model)
+	if got.BaselineSHA != "old-sha" {
+		t.Fatalf("BaselineSHA = %q, want unchanged", got.BaselineSHA)
+	}
+	if got.Notification != "baseline reset failed: boom" {
+		t.Fatalf("notification = %q, want reset failure notice", got.Notification)
+	}
+}
+
+// TestModelManualResetCanRunConsecutively verifies reset state fully clears so
+// users can confirm and run another reset immediately afterward.
+func TestModelManualResetCanRunConsecutively(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "old-sha", []internal.FileDiff{
+		file("old.txt", 1),
+	})
+	model.Width = 80
+	model.Height = 24
+
+	callCount := 0
+	model.ResetBaseline = func() (string, []internal.FileDiff, error) {
+		callCount++
+		switch callCount {
+		case 1:
+			return "sha-1", []internal.FileDiff{file("one.txt", 1)}, nil
+		case 2:
+			return "sha-2", []internal.FileDiff{file("two.txt", 2)}, nil
+		default:
+			t.Fatalf("unexpected reset call %d", callCount)
+			return "", nil, nil
+		}
+	}
+
+	firstPress, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	secondPress, firstCmd := firstPress.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if firstCmd == nil {
+		t.Fatal("expected first reset cmd")
+	}
+	firstMsg, ok := firstCmd().(ManualResetMsg)
+	if !ok {
+		t.Fatalf("message type = %T, want ManualResetMsg", firstCmd())
+	}
+	afterFirstReset, _ := secondPress.(Model).Update(firstMsg)
+	afterFirst := afterFirstReset.(Model)
+	if afterFirst.BaselineSHA != "sha-1" {
+		t.Fatalf("BaselineSHA = %q, want sha-1", afterFirst.BaselineSHA)
+	}
+
+	thirdPress, _ := afterFirst.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	pendingAgain := thirdPress.(Model)
+	if !pendingAgain.resetPending {
+		t.Fatal("expected resetPending after starting second reset")
+	}
+	fourthPress, secondCmd := pendingAgain.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if secondCmd == nil {
+		t.Fatal("expected second reset cmd")
+	}
+	secondMsg, ok := secondCmd().(ManualResetMsg)
+	if !ok {
+		t.Fatalf("message type = %T, want ManualResetMsg", secondCmd())
+	}
+	afterSecondReset, _ := fourthPress.(Model).Update(secondMsg)
+	got := afterSecondReset.(Model)
+	if got.BaselineSHA != "sha-2" {
+		t.Fatalf("BaselineSHA = %q, want sha-2", got.BaselineSHA)
+	}
+	if len(got.Files) != 1 || got.Files[0].Path != "two.txt" {
+		t.Fatalf("Files = %v, want [two.txt]", got.Files)
 	}
 }
 

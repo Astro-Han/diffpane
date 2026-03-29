@@ -15,6 +15,11 @@ type ManualResetMsg struct {
 	Files  []internal.FileDiff
 }
 
+// ManualResetFailedMsg carries a reset error back into the Update loop.
+type ManualResetFailedMsg struct {
+	Error string
+}
+
 // ClearNotificationMsg clears a temporary footer notification.
 // Expected must match the current Notification; stale clears are ignored.
 type ClearNotificationMsg struct {
