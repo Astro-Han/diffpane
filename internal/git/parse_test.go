@@ -1,10 +1,22 @@
 package git
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/Astro-Han/diffpane/internal"
 )
+
+func TestDiffHunkHasStartLineField(t *testing.T) {
+	// The diff hunk API must expose the parsed new-file start line for rendering.
+	field, ok := reflect.TypeOf(internal.DiffHunk{}).FieldByName("StartLine")
+	if !ok {
+		t.Fatal("DiffHunk should include StartLine field")
+	}
+	if field.Type.Kind() != reflect.Int {
+		t.Fatalf("StartLine kind = %s, want int", field.Type.Kind())
+	}
+}
 
 func TestParseDiffSingleFile(t *testing.T) {
 	input := `diff --git a/src/auth.ts b/src/auth.ts

@@ -21,7 +21,9 @@ type DiffLine struct {
 // DiffHunk stores one @@ block from a unified diff.
 type DiffHunk struct {
 	Header string
-	Lines  []DiffLine
+	// StartLine is the first line number in the new-file range from the hunk header.
+	StartLine int
+	Lines     []DiffLine
 }
 
 // FileStatus marks the kind of change for a file.
