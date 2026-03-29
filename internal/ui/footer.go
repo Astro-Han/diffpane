@@ -12,5 +12,5 @@ func RenderFooter(followOn bool, notification string, width int) string {
 	if !followOn {
 		status = "off"
 	}
-	return clampInlineWidth(StyleDim.Render(fmt.Sprintf("q quit · n/p files · f follow: %s · tab list", status)), width)
+	return clampInlineWidth(StyleDim.Render(fmt.Sprintf("q quit · n/p files · f follow: %s · r reset · tab list", status)), width)
 }

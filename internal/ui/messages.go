@@ -9,10 +9,17 @@ type FilesUpdatedMsg struct {
 	ChangedPaths []string
 }
 
-// BaselineResetMsg notifies the UI that baseline SHA changed.
-type BaselineResetMsg struct {
+// ManualResetMsg carries the result of a manual baseline reset (r key).
+type ManualResetMsg struct {
 	NewSHA string
+	Files  []internal.FileDiff
 }
 
 // ClearNotificationMsg clears a temporary footer notification.
-type ClearNotificationMsg struct{}
+// Expected must match the current Notification; stale clears are ignored.
+type ClearNotificationMsg struct {
+	Expected string
+}
+
+// ResetTimeoutMsg cancels a pending manual baseline reset after timeout.
+type ResetTimeoutMsg struct{}
