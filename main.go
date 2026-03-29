@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	internal "github.com/Astro-Han/diffpane/internal"
 	gitpkg "github.com/Astro-Han/diffpane/internal/git"
 	"github.com/Astro-Han/diffpane/internal/ui"
 	"github.com/Astro-Han/diffpane/internal/watcher"
@@ -16,6 +17,24 @@ import (
 
 type messageSender interface {
 	Send(msg tea.Msg)
+}
+
+// computeDiffFunc abstracts diff computation for shared-state helpers.
+type computeDiffFunc func(root, baselineSHA string) ([]internal.FileDiff, error)
+
+// getHeadSHAFunc abstracts HEAD resolution for shared-state helpers.
+type getHeadSHAFunc func(root string) (string, error)
+
+// getBranchNameFunc abstracts branch-name lookup for shared-state helpers.
+type getBranchNameFunc func(root string) string
+
+// sessionBaselineState stores mutable baseline-tracking state shared by the UI
+// reset callback and filesystem watcher goroutines.
+type sessionBaselineState struct {
+	mu          sync.Mutex
+	baseline    string
+	lastHeadSHA string
+	branch      string
 }
 
 // main starts the TUI and wires file-system events into diff recomputation.
@@ -45,13 +64,11 @@ func main() {
 	}
 
 	dirName := filepath.Base(root)
-	model := ui.NewModel(dirName, root, sha, files)
-	program := tea.NewProgram(model, tea.WithAltScreen())
-
-	// The watcher callbacks share mutable baseline state across goroutines.
-	var mu sync.Mutex
-	baseline := sha
-	branch := gitpkg.GetBranchName(root)
+	state := &sessionBaselineState{
+		baseline:    sha,
+		lastHeadSHA: sha,
+		branch:      gitpkg.GetBranchName(root),
+	}
 	gitDir := gitpkg.ResolveGitDir(root)
 	if gitDir == "" {
 		fmt.Fprintln(os.Stderr, "Error starting watcher: could not resolve git directory")
@@ -62,37 +79,32 @@ func main() {
 		commonGitDir = gitDir
 	}
 
+	model := ui.NewModel(dirName, root, sha, files)
+	model.ResetBaseline = func() (string, []internal.FileDiff, error) {
+		return resetSessionBaseline(root, state, gitpkg.ComputeDiff)
+	}
+	program := tea.NewProgram(model, tea.WithAltScreen())
+
 	fileWatcher, err := watcher.New(
 		root,
 		gitDir,
 		commonGitDir,
 		func(changedPaths []string) {
-			mu.Lock()
-			currentBaseline := baseline
-			mu.Unlock()
+			state.mu.Lock()
+			currentBaseline := state.baseline
+			state.mu.Unlock()
 			sendFilesUpdated(os.Stderr, program, root, currentBaseline, changedPaths)
 		},
 		func() {
-			newSHA, shaErr := gitpkg.GetHeadSHA(root)
-			if shaErr != nil {
-				fmt.Fprintf(os.Stderr, "Error reading HEAD: %v\n", shaErr)
-				return
-			}
-			newBranch := gitpkg.GetBranchName(root)
-
-			mu.Lock()
-			changed := newSHA != baseline || newBranch != branch
-			if changed {
-				baseline = newSHA
-				branch = newBranch
-			}
-			mu.Unlock()
-
-			if !changed {
-				return
-			}
-
-			sendBaselineReset(os.Stderr, program, root, newSHA)
+			handleHeadChange(
+				os.Stderr,
+				program,
+				root,
+				state,
+				gitpkg.GetHeadSHA,
+				gitpkg.GetBranchName,
+				gitpkg.ComputeDiff,
+			)
 		},
 	)
 	if err != nil {
@@ -107,33 +119,85 @@ func main() {
 	}
 }
 
+// handleHeadChange refreshes the diff when HEAD or branch changes without
+// moving the session baseline forward.
+func handleHeadChange(
+	stderr io.Writer,
+	sender messageSender,
+	root string,
+	state *sessionBaselineState,
+	getHeadSHA getHeadSHAFunc,
+	getBranchName getBranchNameFunc,
+	computeDiff computeDiffFunc,
+) {
+	newSHA, shaErr := getHeadSHA(root)
+	if shaErr != nil {
+		fmt.Fprintf(stderr, "Error reading HEAD: %v\n", shaErr)
+		return
+	}
+	newBranch := getBranchName(root)
+
+	state.mu.Lock()
+	changed := newSHA != state.lastHeadSHA || newBranch != state.branch
+	currentBaseline := state.baseline
+	state.mu.Unlock()
+
+	if !changed {
+		return
+	}
+
+	if !sendFilesUpdatedWithCompute(stderr, sender, root, currentBaseline, nil, computeDiff) {
+		return
+	}
+
+	state.mu.Lock()
+	state.lastHeadSHA = newSHA
+	state.branch = newBranch
+	state.mu.Unlock()
+}
+
 func sendFilesUpdated(stderr io.Writer, sender messageSender, root, baselineSHA string, changedPaths []string) {
-	newFiles, computeErr := gitpkg.ComputeDiff(root, baselineSHA)
+	_ = sendFilesUpdatedWithCompute(stderr, sender, root, baselineSHA, changedPaths, gitpkg.ComputeDiff)
+}
+
+// sendFilesUpdatedWithCompute recomputes the diff for the provided baseline and
+// pushes the result into the Bubble Tea program.
+func sendFilesUpdatedWithCompute(
+	stderr io.Writer,
+	sender messageSender,
+	root,
+	baselineSHA string,
+	changedPaths []string,
+	computeDiff computeDiffFunc,
+) bool {
+	newFiles, computeErr := computeDiff(root, baselineSHA)
 	if computeErr != nil {
 		_, _ = fmt.Fprintf(stderr, "Error computing diff: %v\n", computeErr)
-		return
+		return false
 	}
 	sender.Send(ui.FilesUpdatedMsg{
 		BaselineSHA:  baselineSHA,
 		Files:        newFiles,
 		ChangedPaths: changedPaths,
 	})
+	return true
 }
 
-func sendBaselineReset(stderr io.Writer, sender messageSender, root, newSHA string) {
-	// Bubble Tea preserves send order, so the reset lands before the fresh diff
-	// recomputation for the new baseline.
-	sender.Send(ui.BaselineResetMsg{NewSHA: newSHA})
+// resetSessionBaseline recomputes the diff against the latest HEAD and only
+// updates the shared baseline after diff computation succeeds.
+func resetSessionBaseline(root string, state *sessionBaselineState, computeDiff computeDiffFunc) (string, []internal.FileDiff, error) {
+	state.mu.Lock()
+	newSHA := state.lastHeadSHA
+	state.mu.Unlock()
 
-	newFiles, computeErr := gitpkg.ComputeDiff(root, newSHA)
-	if computeErr != nil {
-		_, _ = fmt.Fprintf(stderr, "Error computing diff: %v\n", computeErr)
-		// Clear stale files so the UI does not show diffs from the old baseline.
-		sender.Send(ui.FilesUpdatedMsg{BaselineSHA: newSHA})
-		return
+	newFiles, err := computeDiff(root, newSHA)
+	if err != nil {
+		return "", nil, err
 	}
-	sender.Send(ui.FilesUpdatedMsg{
-		BaselineSHA: newSHA,
-		Files:       newFiles,
-	})
+
+	state.mu.Lock()
+	state.baseline = newSHA
+	state.mu.Unlock()
+
+	return newSHA, newFiles, nil
 }

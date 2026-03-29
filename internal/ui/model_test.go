@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -226,36 +227,6 @@ func TestModelRestoreFollowUsesMostRecentChangedPath(t *testing.T) {
 	}
 }
 
-// TestModelDropsQueuedOverlayUpdateAfterBaselineReset verifies a queued update
-// from the old baseline cannot overwrite the reset state when overlay closes.
-func TestModelDropsQueuedOverlayUpdateAfterBaselineReset(t *testing.T) {
-	model := NewModel("repo", "/tmp/repo", "old-sha", []internal.FileDiff{
-		file("old.txt", 1),
-	})
-
-	opened, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
-	withOverlay := opened.(Model)
-
-	queued, _ := withOverlay.Update(FilesUpdatedMsg{
-		BaselineSHA: "old-sha",
-		Files: []internal.FileDiff{
-			file("stale.txt", 1),
-		},
-		ChangedPaths: []string{"stale.txt"},
-	})
-	withPending := queued.(Model)
-	if withPending.PendingUpdate == nil {
-		t.Fatal("expected pending update")
-	}
-
-	reset, _ := withPending.Update(BaselineResetMsg{NewSHA: "new-sha"})
-	closed, _ := reset.(Model).Update(tea.KeyMsg{Type: tea.KeyEsc})
-	got := closed.(Model)
-	if len(got.Files) != 1 || got.Files[0].Path != "old.txt" {
-		t.Fatalf("stale overlay update should be dropped, got %#v", got.Files)
-	}
-}
-
 // TestModelFollowAnchorsWhenPrecedingFilesDisappear verifies that follow mode
 // keeps the current file selected when earlier files are removed from the list.
 func TestModelFollowAnchorsWhenPrecedingFilesDisappear(t *testing.T) {
@@ -307,37 +278,470 @@ func TestModelFollowClampsWhenCurrentFileDisappears(t *testing.T) {
 	}
 }
 
-// TestModelOverlayAppliesFreshUpdateAfterBaselineReset verifies a newer
-// baseline refresh still lands after overlay close, even if an old update was
-// queued earlier in the same overlay session.
-func TestModelOverlayAppliesFreshUpdateAfterBaselineReset(t *testing.T) {
+// TestModelOverlayIgnoresResetKey verifies r key is ignored when overlay is open.
+func TestModelOverlayIgnoresResetKey(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		file("a.txt", 1),
+	})
+	model.Width = 80
+	model.Height = 24
+
+	opened, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m := opened.(Model)
+	if !m.OverlayOpen {
+		t.Fatal("expected overlay open")
+	}
+
+	afterR, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	got := afterR.(Model)
+	if got.resetPending {
+		t.Fatal("resetPending should be false in overlay")
+	}
+}
+
+// TestModelManualResetDoublePressR verifies double-press r dispatches async
+// reset and ManualResetMsg applies correctly.
+func TestModelManualResetDoublePressR(t *testing.T) {
 	model := NewModel("repo", "/tmp/repo", "old-sha", []internal.FileDiff{
 		file("old.txt", 1),
 	})
+	model.Width = 80
+	model.Height = 24
+	model.ResetBaseline = func() (string, []internal.FileDiff, error) {
+		return "new-sha", []internal.FileDiff{file("new.txt", 2)}, nil
+	}
+
+	first, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m := first.(Model)
+	if !m.resetPending {
+		t.Fatal("expected resetPending after first r")
+	}
+	if m.Notification != "press r to reset baseline" {
+		t.Fatalf("notification = %q, want 'press r to reset baseline'", m.Notification)
+	}
+
+	second, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m = second.(Model)
+	if m.resetPending {
+		t.Fatal("resetPending should be false after second r")
+	}
+	if cmd == nil {
+		t.Fatal("expected non-nil Cmd from second r press")
+	}
+
+	afterReset, _ := m.Update(ManualResetMsg{
+		NewSHA: "new-sha",
+		Files:  []internal.FileDiff{file("new.txt", 2)},
+	})
+	got := afterReset.(Model)
+	if got.BaselineSHA != "new-sha" {
+		t.Fatalf("BaselineSHA = %q, want 'new-sha'", got.BaselineSHA)
+	}
+	if len(got.Files) != 1 || got.Files[0].Path != "new.txt" {
+		t.Fatalf("Files = %v, want [new.txt]", got.Files)
+	}
+	if got.Notification != "baseline reset" {
+		t.Fatalf("notification = %q, want 'baseline reset'", got.Notification)
+	}
+}
+
+// TestModelResetCancelledByOtherKey verifies non-r key cancels pending reset
+// and dispatches normally.
+func TestModelResetCancelledByOtherKey(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		file("a.txt", 1),
+		file("b.txt", 1),
+	})
+	model.Width = 80
+	model.Height = 24
+	model.ResetBaseline = func() (string, []internal.FileDiff, error) {
+		return "sha", model.Files, nil
+	}
+
+	first, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m := first.(Model)
+	if !m.resetPending {
+		t.Fatal("expected resetPending")
+	}
+
+	afterN, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	got := afterN.(Model)
+	if got.resetPending {
+		t.Fatal("resetPending should be false after n")
+	}
+	if got.Notification != "" {
+		t.Fatalf("notification = %q, want empty", got.Notification)
+	}
+	if got.CurrentIdx != 1 {
+		t.Fatalf("CurrentIdx = %d, want 1 (n should navigate)", got.CurrentIdx)
+	}
+}
+
+// TestModelResetTimeout verifies pending reset is cancelled by timeout.
+func TestModelResetTimeout(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		file("a.txt", 1),
+	})
+	model.Width = 80
+	model.Height = 24
+	model.ResetBaseline = func() (string, []internal.FileDiff, error) {
+		return "sha", model.Files, nil
+	}
+
+	first, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m := first.(Model)
+	if !m.resetPending {
+		t.Fatal("expected resetPending")
+	}
+
+	afterTimeout, _ := m.Update(ResetTimeoutMsg{})
+	got := afterTimeout.(Model)
+	if got.resetPending {
+		t.Fatal("resetPending should be false after timeout")
+	}
+	if got.Notification != "" {
+		t.Fatalf("notification = %q, want empty", got.Notification)
+	}
+}
+
+// TestModelManualResetToEmptyFiles verifies reset handles empty file list.
+func TestModelManualResetToEmptyFiles(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "old-sha", []internal.FileDiff{
+		file("a.txt", 1),
+	})
+	model.Width = 80
+	model.Height = 24
+
+	afterReset, _ := model.Update(ManualResetMsg{
+		NewSHA: "new-sha",
+		Files:  nil,
+	})
+	got := afterReset.(Model)
+	if got.BaselineSHA != "new-sha" {
+		t.Fatalf("BaselineSHA = %q, want 'new-sha'", got.BaselineSHA)
+	}
+	if len(got.Files) != 0 {
+		t.Fatalf("Files should be empty, got %d", len(got.Files))
+	}
+	if got.CurrentIdx != 0 {
+		t.Fatalf("CurrentIdx = %d, want 0", got.CurrentIdx)
+	}
+}
+
+// TestModelManualResetFailureShowsNotification verifies reset errors surface a
+// temporary footer notification instead of failing silently.
+func TestModelManualResetFailureShowsNotification(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "old-sha", []internal.FileDiff{
+		file("old.txt", 1),
+	})
+	model.Width = 80
+	model.Height = 24
+	model.ResetBaseline = func() (string, []internal.FileDiff, error) {
+		return "", nil, errors.New("boom")
+	}
+
+	first, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	second, cmd := first.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m := second.(Model)
+	if cmd == nil {
+		t.Fatal("expected non-nil Cmd from second r press")
+	}
+
+	msg := cmd()
+	failed, ok := msg.(ManualResetFailedMsg)
+	if !ok {
+		t.Fatalf("message type = %T, want ManualResetFailedMsg", msg)
+	}
+	if failed.Error != "boom" {
+		t.Fatalf("error = %q, want boom", failed.Error)
+	}
+
+	afterFailure, _ := m.Update(failed)
+	got := afterFailure.(Model)
+	if got.BaselineSHA != "old-sha" {
+		t.Fatalf("BaselineSHA = %q, want unchanged", got.BaselineSHA)
+	}
+	if got.Notification != "baseline reset failed: boom" {
+		t.Fatalf("notification = %q, want reset failure notice", got.Notification)
+	}
+}
+
+// TestModelManualResetCanRunConsecutively verifies reset state fully clears so
+// users can confirm and run another reset immediately afterward.
+func TestModelManualResetCanRunConsecutively(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "old-sha", []internal.FileDiff{
+		file("old.txt", 1),
+	})
+	model.Width = 80
+	model.Height = 24
+
+	callCount := 0
+	model.ResetBaseline = func() (string, []internal.FileDiff, error) {
+		callCount++
+		switch callCount {
+		case 1:
+			return "sha-1", []internal.FileDiff{file("one.txt", 1)}, nil
+		case 2:
+			return "sha-2", []internal.FileDiff{file("two.txt", 2)}, nil
+		default:
+			t.Fatalf("unexpected reset call %d", callCount)
+			return "", nil, nil
+		}
+	}
+
+	firstPress, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	secondPress, firstCmd := firstPress.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if firstCmd == nil {
+		t.Fatal("expected first reset cmd")
+	}
+	firstMsg, ok := firstCmd().(ManualResetMsg)
+	if !ok {
+		t.Fatalf("message type = %T, want ManualResetMsg", firstCmd())
+	}
+	afterFirstReset, _ := secondPress.(Model).Update(firstMsg)
+	afterFirst := afterFirstReset.(Model)
+	if afterFirst.BaselineSHA != "sha-1" {
+		t.Fatalf("BaselineSHA = %q, want sha-1", afterFirst.BaselineSHA)
+	}
+
+	thirdPress, _ := afterFirst.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	pendingAgain := thirdPress.(Model)
+	if !pendingAgain.resetPending {
+		t.Fatal("expected resetPending after starting second reset")
+	}
+	fourthPress, secondCmd := pendingAgain.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if secondCmd == nil {
+		t.Fatal("expected second reset cmd")
+	}
+	secondMsg, ok := secondCmd().(ManualResetMsg)
+	if !ok {
+		t.Fatalf("message type = %T, want ManualResetMsg", secondCmd())
+	}
+	afterSecondReset, _ := fourthPress.(Model).Update(secondMsg)
+	got := afterSecondReset.(Model)
+	if got.BaselineSHA != "sha-2" {
+		t.Fatalf("BaselineSHA = %q, want sha-2", got.BaselineSHA)
+	}
+	if len(got.Files) != 1 || got.Files[0].Path != "two.txt" {
+		t.Fatalf("Files = %v, want [two.txt]", got.Files)
+	}
+}
+
+// TestModelManualResetQueuesUpdateWhileOverlayOpen verifies reset results do
+// not mutate the underlying file list until the overlay closes.
+func TestModelManualResetQueuesUpdateWhileOverlayOpen(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "old-sha", []internal.FileDiff{
+		file("old-a.txt", 1),
+		file("old-b.txt", 1),
+	})
+	model.Width = 80
+	model.Height = 24
+	model.CurrentIdx = 1
+	model.ResetBaseline = func() (string, []internal.FileDiff, error) {
+		return "new-sha", []internal.FileDiff{file("new.txt", 2)}, nil
+	}
+
+	first, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	second, cmd := first.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if cmd == nil {
+		t.Fatal("expected reset cmd")
+	}
+
+	opened, _ := second.(Model).Update(tea.KeyMsg{Type: tea.KeyTab})
+	withOverlay := opened.(Model)
+	if !withOverlay.OverlayOpen {
+		t.Fatal("expected overlay open")
+	}
+
+	afterMsg, _ := withOverlay.Update(ManualResetMsg{
+		NewSHA: "new-sha",
+		Files:  []internal.FileDiff{file("new.txt", 2)},
+	})
+	pending := afterMsg.(Model)
+	if pending.BaselineSHA != "new-sha" {
+		t.Fatalf("BaselineSHA = %q, want new-sha", pending.BaselineSHA)
+	}
+	if len(pending.Files) != 2 || pending.Files[0].Path != "old-a.txt" {
+		t.Fatalf("Files changed under overlay: %v", pending.Files)
+	}
+	if pending.PendingUpdate == nil {
+		t.Fatal("expected pending update while overlay stays open")
+	}
+	if len(pending.OverlaySnapshot) != 2 || pending.OverlaySnapshot[0].Path != "old-a.txt" {
+		t.Fatalf("OverlaySnapshot = %v, want old snapshot", pending.OverlaySnapshot)
+	}
+
+	closed, _ := pending.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	got := closed.(Model)
+	if len(got.Files) != 1 || got.Files[0].Path != "new.txt" {
+		t.Fatalf("Files = %v, want [new.txt]", got.Files)
+	}
+	if got.CurrentIdx != 0 {
+		t.Fatalf("CurrentIdx = %d, want 0 after clamping", got.CurrentIdx)
+	}
+}
+
+// TestModelManualResetIgnoresSecondRequestWhileInFlight verifies a second reset
+// cannot start before the previous async reset result returns.
+func TestModelManualResetIgnoresSecondRequestWhileInFlight(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "old-sha", []internal.FileDiff{
+		file("old.txt", 1),
+	})
+	model.Width = 80
+	model.Height = 24
+	callCount := 0
+	model.ResetBaseline = func() (string, []internal.FileDiff, error) {
+		callCount++
+		return "new-sha", []internal.FileDiff{file("new.txt", 1)}, nil
+	}
+
+	first, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	second, firstCmd := first.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	inFlight := second.(Model)
+	if firstCmd == nil {
+		t.Fatal("expected first reset cmd")
+	}
+	if !inFlight.resetInFlight {
+		t.Fatal("expected resetInFlight after dispatching reset")
+	}
+
+	third, secondCmd := inFlight.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	stillInFlight := third.(Model)
+	if secondCmd != nil {
+		t.Fatal("second reset should be ignored while first is in flight")
+	}
+	if !stillInFlight.resetInFlight {
+		t.Fatal("resetInFlight should stay true until result arrives")
+	}
+	if stillInFlight.resetPending {
+		t.Fatal("resetPending should stay false while request is in flight")
+	}
+	if callCount != 0 {
+		t.Fatalf("ResetBaseline should not run until cmd executes, got %d calls", callCount)
+	}
+
+	msg := firstCmd()
+	resetMsg, ok := msg.(ManualResetMsg)
+	if !ok {
+		t.Fatalf("message type = %T, want ManualResetMsg", msg)
+	}
+	if callCount != 1 {
+		t.Fatalf("ResetBaseline call count = %d, want 1", callCount)
+	}
+
+	afterReset, _ := stillInFlight.Update(resetMsg)
+	got := afterReset.(Model)
+	if got.resetInFlight {
+		t.Fatal("resetInFlight should clear after result")
+	}
+	if got.BaselineSHA != "new-sha" {
+		t.Fatalf("BaselineSHA = %q, want new-sha", got.BaselineSHA)
+	}
+}
+
+// TestModelManualResetReplacesQueuedOverlayUpdate verifies a reset result
+// replaces any older queued overlay update instead of merging stale paths into
+// the new baseline state.
+func TestModelManualResetReplacesQueuedOverlayUpdate(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "old-sha", []internal.FileDiff{
+		file("current.txt", 1),
+		file("stale.txt", 1),
+	})
+	model.Width = 80
+	model.Height = 24
+	model.FollowOn = false
+	model.CurrentIdx = 0
 
 	opened, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
 	withOverlay := opened.(Model)
+	if !withOverlay.OverlayOpen {
+		t.Fatal("expected overlay open")
+	}
 
 	queuedOld, _ := withOverlay.Update(FilesUpdatedMsg{
 		BaselineSHA: "old-sha",
 		Files: []internal.FileDiff{
+			file("current.txt", 1),
 			file("stale.txt", 1),
 		},
 		ChangedPaths: []string{"stale.txt"},
 	})
-	reset, _ := queuedOld.(Model).Update(BaselineResetMsg{NewSHA: "new-sha"})
-	queuedNew, _ := reset.(Model).Update(FilesUpdatedMsg{
-		BaselineSHA: "new-sha",
-		Files: []internal.FileDiff{
-			file("fresh.txt", 1),
-		},
-		ChangedPaths: []string{"fresh.txt"},
-	})
-	closed, _ := queuedNew.(Model).Update(tea.KeyMsg{Type: tea.KeyEsc})
-	got := closed.(Model)
+	pendingOld := queuedOld.(Model)
+	if pendingOld.PendingUpdate == nil {
+		t.Fatal("expected old pending update")
+	}
 
+	afterReset, _ := pendingOld.Update(ManualResetMsg{
+		NewSHA: "new-sha",
+		Files:  []internal.FileDiff{file("fresh.txt", 2)},
+	})
+	pendingReset := afterReset.(Model)
+	if pendingReset.PendingUpdate == nil {
+		t.Fatal("expected reset pending update")
+	}
+	if len(pendingReset.PendingUpdate.ChangedPaths) != 0 {
+		t.Fatalf("ChangedPaths = %v, want empty after reset replacement", pendingReset.PendingUpdate.ChangedPaths)
+	}
+
+	closed, _ := pendingReset.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	got := closed.(Model)
 	if len(got.Files) != 1 || got.Files[0].Path != "fresh.txt" {
-		t.Fatalf("fresh overlay update should win after reset, got %#v", got.Files)
+		t.Fatalf("Files = %v, want [fresh.txt]", got.Files)
+	}
+	if got.NewCount != 0 {
+		t.Fatalf("NewCount = %d, want 0 after reset", got.NewCount)
+	}
+	if len(got.NewFiles) != 0 {
+		t.Fatalf("NewFiles = %v, want empty after reset", got.NewFiles)
+	}
+	if got.LastChangedPath != "" {
+		t.Fatalf("LastChangedPath = %q, want empty after reset", got.LastChangedPath)
+	}
+}
+
+// TestModelManualResetNotificationIgnoresStaleClear verifies an older reset's
+// clear timer cannot wipe a newer reset notification with the same text.
+func TestModelManualResetNotificationIgnoresStaleClear(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "old-sha", []internal.FileDiff{
+		file("old.txt", 1),
+	})
+	model.Width = 80
+	model.Height = 24
+
+	firstReset, firstClearCmd := model.Update(ManualResetMsg{
+		NewSHA: "sha-1",
+		Files:  []internal.FileDiff{file("one.txt", 1)},
+	})
+	first := firstReset.(Model)
+	if firstClearCmd == nil {
+		t.Fatal("expected clear cmd after first reset")
+	}
+
+	secondReset, secondClearCmd := first.Update(ManualResetMsg{
+		NewSHA: "sha-2",
+		Files:  []internal.FileDiff{file("two.txt", 2)},
+	})
+	second := secondReset.(Model)
+	if secondClearCmd == nil {
+		t.Fatal("expected clear cmd after second reset")
+	}
+	if second.Notification != "baseline reset" {
+		t.Fatalf("notification = %q, want baseline reset", second.Notification)
+	}
+
+	staleClear := firstClearCmd()
+	afterStale, _ := second.Update(staleClear)
+	got := afterStale.(Model)
+	if got.Notification != "baseline reset" {
+		t.Fatalf("stale clear removed latest notification: %q", got.Notification)
+	}
+}
+
+// TestRenderFooterIncludesResetKey verifies footer shows r reset.
+func TestRenderFooterIncludesResetKey(t *testing.T) {
+	footer := RenderFooter(true, "", 80)
+	if !strings.Contains(footer, "r reset") {
+		t.Fatalf("footer missing 'r reset': %q", footer)
 	}
 }
 

@@ -23,12 +23,19 @@ type Model struct {
 	NewFiles        map[string]bool
 	LastChangedPath string
 	Notification    string
+	notificationSeq int
 
 	OverlayOpen      bool
 	OverlayCursor    int
 	OverlaySnapshot  []internal.FileDiff
 	OverlayFollowWas bool
 	PendingUpdate    *FilesUpdatedMsg
+	// resetPending is true between first and second r press.
+	resetPending bool
+	// resetInFlight is true while an async manual reset command is running.
+	resetInFlight bool
+	// ResetBaseline resets the session baseline asynchronously from a tea.Cmd.
+	ResetBaseline func() (string, []internal.FileDiff, error)
 
 	Width  int
 	Height int
@@ -59,17 +66,54 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case FilesUpdatedMsg:
 		return m.handleFilesUpdated(msg)
-	case BaselineResetMsg:
+	case ManualResetMsg:
 		m.BaselineSHA = msg.NewSHA
 		m.Notification = "baseline reset"
+		m.resetPending = false
+		m.resetInFlight = false
 		m.NewCount = 0
 		m.NewFiles = make(map[string]bool)
 		m.LastChangedPath = ""
+		// Manual reset starts a new baseline epoch, so any queued pre-reset
+		// update must be replaced rather than merged.
+		if m.OverlayOpen {
+			m.PendingUpdate = &FilesUpdatedMsg{
+				BaselineSHA: msg.NewSHA,
+				Files:       msg.Files,
+			}
+		} else {
+			m = m.applyFilesUpdate(FilesUpdatedMsg{
+				BaselineSHA: msg.NewSHA,
+				Files:       msg.Files,
+			})
+		}
+		m.notificationSeq++
+		token := m.notificationSeq
 		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-			return ClearNotificationMsg{}
+			return ClearNotificationMsg{Token: token}
 		})
+	case ManualResetFailedMsg:
+		m.resetPending = false
+		m.resetInFlight = false
+		m.Notification = "baseline reset failed"
+		if msg.Error != "" {
+			m.Notification += ": " + msg.Error
+		}
+		m.notificationSeq++
+		token := m.notificationSeq
+		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+			return ClearNotificationMsg{Token: token}
+		})
+	case ResetTimeoutMsg:
+		if m.resetPending {
+			m.resetPending = false
+			m.Notification = ""
+		}
+		return m, nil
 	case ClearNotificationMsg:
-		m.Notification = ""
+		if msg.Token == 0 || msg.Token == m.notificationSeq {
+			m.Notification = ""
+		}
 		return m, nil
 	case tea.KeyMsg:
 		if m.OverlayOpen {
@@ -194,6 +238,12 @@ func (m Model) applyFilesUpdate(msg FilesUpdatedMsg) Model {
 }
 
 func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
+	// Cancel pending reset on any non-r key, then dispatch normally.
+	if m.resetPending && key != "r" {
+		m.resetPending = false
+		m.Notification = ""
+	}
+
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -233,6 +283,36 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 			m.NewFiles = make(map[string]bool)
 		}
 		return m, nil
+	case "r":
+		if m.resetInFlight {
+			return m, nil
+		}
+		if m.resetPending {
+			// Second press dispatches async reset without blocking Update.
+			m.resetPending = false
+			m.resetInFlight = true
+			m.Notification = ""
+			resetFn := m.ResetBaseline
+			if resetFn == nil {
+				m.resetInFlight = false
+				return m, nil
+			}
+			return m, func() tea.Msg {
+				newSHA, newFiles, err := resetFn()
+				if err != nil {
+					return ManualResetFailedMsg{Error: err.Error()}
+				}
+				return ManualResetMsg{NewSHA: newSHA, Files: newFiles}
+			}
+		}
+		if m.ResetBaseline == nil {
+			return m, nil
+		}
+		m.resetPending = true
+		m.Notification = "press r to reset baseline"
+		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+			return ResetTimeoutMsg{}
+		})
 	case "tab":
 		m.OverlayOpen = true
 		m.OverlayCursor = m.CurrentIdx
