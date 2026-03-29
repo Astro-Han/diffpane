@@ -110,12 +110,13 @@ func TestLastChangedHunkIndex(t *testing.T) {
 			want: -1,
 		},
 		{
-			name:    "new file",
+			name:    "empty previous set",
 			oldSigs: nil,
 			newHunks: []internal.DiffHunk{
 				testHunk("@@ -1,1 +1,1 @@", 10, addLine("a")),
+				testHunk("@@ -2,1 +2,1 @@", 20, addLine("b")),
 			},
-			want: -1,
+			want: 1,
 		},
 		{
 			name: "duplicate hunk content",

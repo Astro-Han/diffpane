@@ -22,6 +22,9 @@ type Model struct {
 	NewCount        int
 	NewFiles        map[string]bool
 	LastChangedPath string
+	// followTargetPath/hunk track the last auto-follow target for resize recalculation.
+	followTargetPath string
+	followTargetHunk int
 	// prevHunkSigs stores the previous follow baseline by file path.
 	prevHunkSigs    map[string][]uint64
 	Notification    string
@@ -65,6 +68,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.Width = msg.Width
 		m.Height = msg.Height
+		m.realignFollowTarget()
 		m.clampScrollOffset()
 		return m, nil
 	case FilesUpdatedMsg:
@@ -254,10 +258,12 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "j", "down":
+		m.clearFollowTarget()
 		m.ScrollOffset++
 		m.clampScrollOffset()
 		return m, nil
 	case "k", "up":
+		m.clearFollowTarget()
 		if m.ScrollOffset > 0 {
 			m.ScrollOffset--
 		}
@@ -265,6 +271,7 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "n":
 		if len(m.Files) > 1 {
+			m.clearFollowTarget()
 			m.CurrentIdx = (m.CurrentIdx + 1) % len(m.Files)
 			m.ScrollOffset = 0
 			if m.FollowOn {
@@ -274,6 +281,7 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "p":
 		if len(m.Files) > 1 {
+			m.clearFollowTarget()
 			m.CurrentIdx = (m.CurrentIdx - 1 + len(m.Files)) % len(m.Files)
 			m.ScrollOffset = 0
 			if m.FollowOn {
@@ -349,6 +357,7 @@ func (m Model) handleOverlayKey(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		if m.OverlayCursor < len(m.OverlaySnapshot) {
+			m.clearFollowTarget()
 			m.CurrentIdx = m.OverlayCursor
 			m.ScrollOffset = 0
 			m.FollowOn = false
@@ -401,6 +410,11 @@ func (m *Model) selectLatestPendingFile() {
 		}
 	}
 
+	if m.CurrentIdx >= 0 && m.CurrentIdx < len(m.Files) {
+		m.setFollowTarget(m.CurrentIdx, currentPath)
+		return
+	}
+
 	m.clampScrollOffset()
 }
 
@@ -411,6 +425,7 @@ func (m *Model) setFollowTarget(targetIdx int, currentPath string) {
 
 	oldSigs, hadBaseline := m.prevHunkSigs[file.Path]
 	if !hadBaseline {
+		m.clearFollowTarget()
 		m.ScrollOffset = 0
 		m.clampScrollOffset()
 		return
@@ -419,11 +434,39 @@ func (m *Model) setFollowTarget(targetIdx int, currentPath string) {
 	hunkIdx := lastChangedHunkIndex(oldSigs, file.Hunks)
 	if hunkIdx >= 0 {
 		m.ScrollOffset = hunkVisualOffset(file, hunkIdx, m.Width)
+		m.followTargetPath = file.Path
+		m.followTargetHunk = hunkIdx
 	} else if file.Path != currentPath {
+		m.clearFollowTarget()
 		m.ScrollOffset = 0
 	}
 
 	m.clampScrollOffset()
+}
+
+// clearFollowTarget drops width-sensitive auto-follow alignment state.
+func (m *Model) clearFollowTarget() {
+	m.followTargetPath = ""
+	m.followTargetHunk = -1
+}
+
+// realignFollowTarget recomputes the stored follow target after width changes.
+func (m *Model) realignFollowTarget() {
+	if !m.FollowOn || m.followTargetPath == "" || m.followTargetHunk < 0 {
+		return
+	}
+	if m.CurrentIdx < 0 || m.CurrentIdx >= len(m.Files) {
+		m.clearFollowTarget()
+		return
+	}
+
+	file := &m.Files[m.CurrentIdx]
+	if file.Path != m.followTargetPath || m.followTargetHunk >= len(file.Hunks) {
+		m.clearFollowTarget()
+		return
+	}
+
+	m.ScrollOffset = hunkVisualOffset(file, m.followTargetHunk, m.Width)
 }
 
 // buildPrevHunkSigs snapshots current file hunks for the next follow comparison.

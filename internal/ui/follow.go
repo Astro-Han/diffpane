@@ -22,11 +22,8 @@ func hunkFingerprints(hunks []internal.DiffHunk) []uint64 {
 }
 
 // lastChangedHunkIndex finds the newest hunk whose fingerprint was absent before.
+// Callers handle the "brand new path" case separately via prevHunkSigs membership.
 func lastChangedHunkIndex(oldSigs []uint64, newHunks []internal.DiffHunk) int {
-	if len(oldSigs) == 0 {
-		return -1
-	}
-
 	seen := make(map[uint64]struct{}, len(oldSigs))
 	for _, sig := range oldSigs {
 		seen[sig] = struct{}{}

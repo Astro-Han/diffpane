@@ -1147,3 +1147,96 @@ func TestModelRestoreFollowNewFileScrollsTop(t *testing.T) {
 		t.Fatalf("ScrollOffset = %d, want 0", got.ScrollOffset)
 	}
 }
+
+// TestModelRestoreFollowScrollsCurrentFileChange verifies follow restore also
+// detects accumulated changes in the currently selected file.
+func TestModelRestoreFollowScrollsCurrentFileChange(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		fileWithHunks("a.txt",
+			addHunk(10, "first change"),
+			addHunk(20, "second change"),
+		),
+	})
+	model.Width = 80
+	model.Height = 3
+	model.FollowOn = false
+
+	updated, _ := model.Update(FilesUpdatedMsg{
+		BaselineSHA: "sha",
+		Files: []internal.FileDiff{
+			fileWithHunks("a.txt",
+				addHunk(10, "first change"),
+				addHunk(20, "second change"),
+				addHunk(30, "latest change"),
+			),
+		},
+		ChangedPaths: []string{"a.txt"},
+	})
+
+	restored, _ := updated.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	got := restored.(Model)
+	if got.ScrollOffset != 4 {
+		t.Fatalf("ScrollOffset = %d, want 4", got.ScrollOffset)
+	}
+}
+
+// TestModelResizeRecalculatesFollowTargetOffset verifies width changes keep the
+// followed hunk aligned to the top using the new wrapping width.
+func TestModelResizeRecalculatesFollowTargetOffset(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		fileWithHunks("a.txt",
+			addHunk(10, "abcdefghij"),
+		),
+	})
+	model.Width = 12
+	model.Height = 3
+
+	updated, _ := model.Update(FilesUpdatedMsg{
+		BaselineSHA: "sha",
+		Files: []internal.FileDiff{
+			fileWithHunks("a.txt",
+				addHunk(10, "abcdefghij"),
+				addHunk(20, "latest change"),
+			),
+		},
+		ChangedPaths: []string{"a.txt"},
+	})
+
+	got := updated.(Model)
+	if got.ScrollOffset != 2 {
+		t.Fatalf("ScrollOffset before resize = %d, want 2", got.ScrollOffset)
+	}
+
+	resized, _ := got.Update(tea.WindowSizeMsg{Width: 6, Height: 3})
+	afterResize := resized.(Model)
+	if afterResize.ScrollOffset != 4 {
+		t.Fatalf("ScrollOffset after resize = %d, want 4", afterResize.ScrollOffset)
+	}
+}
+
+// TestModelFollowScrollsExistingEmptyHunkFile verifies an existing file with
+// an empty previous fingerprint set still detects newly added textual hunks.
+func TestModelFollowScrollsExistingEmptyHunkFile(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		{Path: "a.txt"},
+	})
+	model.Width = 80
+	model.Height = 3
+
+	updated, _ := model.Update(FilesUpdatedMsg{
+		BaselineSHA: "sha",
+		Files: []internal.FileDiff{
+			fileWithHunks("a.txt",
+				addHunk(10, "first change"),
+				addHunk(20, "second change"),
+				addHunk(30, "latest change"),
+			),
+		},
+		ChangedPaths: []string{"a.txt"},
+	})
+
+	got := updated.(Model)
+	if got.ScrollOffset != 4 {
+		t.Fatalf("ScrollOffset = %d, want 4", got.ScrollOffset)
+	}
+}
