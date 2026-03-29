@@ -15,14 +15,8 @@ func RenderHeader(dirName string, files []internal.FileDiff, currentIdx, newCoun
 
 	currentIdx = min(max(currentIdx, 0), len(files)-1)
 	file := files[currentIdx]
-	paths := make([]string, len(files))
-	for i, item := range files {
-		paths[i] = item.Path
-	}
-	shortPaths := ShortestUniquePaths(paths)
-	displayPath := shortPaths[currentIdx]
 
-	result := fmt.Sprintf("%s %s", displayPath, renderFileStats(file))
+	result := fmt.Sprintf("%s %s", file.Path, renderFileStats(file))
 	if len(files) > 1 {
 		result += StyleDim.Render(fmt.Sprintf(" ‹ %d/%d ›", currentIdx+1, len(files)))
 	}
