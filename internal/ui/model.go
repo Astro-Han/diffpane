@@ -257,12 +257,12 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "j", "down":
+	case "down":
 		m.clearFollowTarget()
 		m.ScrollOffset++
 		m.clampScrollOffset()
 		return m, nil
-	case "k", "up":
+	case "up":
 		m.clearFollowTarget()
 		if m.ScrollOffset > 0 {
 			m.ScrollOffset--
@@ -345,12 +345,12 @@ func (m Model) handleOverlayKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "j", "down":
+	case "down":
 		if m.OverlayCursor < len(m.OverlaySnapshot)-1 {
 			m.OverlayCursor++
 		}
 		return m, nil
-	case "k", "up":
+	case "up":
 		if m.OverlayCursor > 0 {
 			m.OverlayCursor--
 		}
