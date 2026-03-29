@@ -44,6 +44,9 @@ type Model struct {
 
 	Width  int
 	Height int
+
+	// displayCache reuses rendered visual lines across repeated View calls.
+	displayCache *displayLineCache
 }
 
 // NewModel constructs the initial UI state.
@@ -56,6 +59,7 @@ func NewModel(dirName, repoDir, baselineSHA string, files []internal.FileDiff) M
 		FollowOn:     true,
 		NewFiles:     make(map[string]bool),
 		prevHunkSigs: buildPrevHunkSigs(files),
+		displayCache: newDisplayLineCache(),
 	}
 }
 
@@ -520,7 +524,10 @@ func (m Model) View() string {
 	if m.OverlayOpen {
 		content = RenderOverlay(m.OverlaySnapshot, m.OverlayCursor, diffHeight, m.Width)
 	} else if len(m.Files) > 0 && m.CurrentIdx < len(m.Files) {
-		content = RenderDiffView(&m.Files[m.CurrentIdx], m.ScrollOffset, m.Width, diffHeight)
+		lines := m.displayCache.get(&m.Files[m.CurrentIdx], m.Width, func() []string {
+			return diffDisplayLines(&m.Files[m.CurrentIdx], m.Width)
+		})
+		content = renderDisplayLines(lines, m.ScrollOffset, diffHeight)
 	}
 
 	contentLines := strings.Count(content, "\n") + 1

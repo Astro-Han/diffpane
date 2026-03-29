@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -313,5 +314,163 @@ func TestDiffDisplayLinesTabLineFitsNarrowViewport(t *testing.T) {
 		if rows := terminalRows(line, width); rows != 1 {
 			t.Fatalf("line %d occupies %d terminal rows, want 1: %q", i, rows, ansi.Strip(line))
 		}
+	}
+}
+
+// TestDiffDisplayLinesGoFileHighlighted verifies Go diffs get syntax colors
+// in addition to the diff prefix styling.
+func TestDiffDisplayLinesGoFileHighlighted(t *testing.T) {
+	file := &internal.FileDiff{
+		Path: "main.go",
+		Hunks: []internal.DiffHunk{{
+			Header:    "@@ -0,0 +1,1 @@",
+			StartLine: 1,
+			Lines: []internal.DiffLine{{
+				Type:    internal.LineAdd,
+				Content: "func main() {",
+			}},
+		}},
+	}
+
+	lines := diffDisplayLines(file, 80)
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 lines (separator + code), got %d", len(lines))
+	}
+
+	codeLine := lines[1]
+	stripped := ansi.Strip(codeLine)
+	if !strings.Contains(stripped, "+func main() {") {
+		t.Fatalf("stripped = %q, should contain '+func main() {'", stripped)
+	}
+	if len(codeLine) <= len(stripped) {
+		t.Fatalf("expected ANSI-highlighted output (len %d <= stripped len %d)", len(codeLine), len(stripped))
+	}
+}
+
+// TestDiffDisplayLinesPlaintextNoHighlight verifies unknown file types keep
+// plain code content without extra chroma ANSI styling.
+func TestDiffDisplayLinesPlaintextNoHighlight(t *testing.T) {
+	file := &internal.FileDiff{
+		Path: "data.randomext123",
+		Hunks: []internal.DiffHunk{{
+			Header: "@@ -0,0 +1,1 @@",
+			Lines: []internal.DiffLine{{
+				Type:    internal.LineContext,
+				Content: "just plain text",
+			}},
+		}},
+	}
+
+	lines := diffDisplayLines(file, 80)
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 lines, got %d", len(lines))
+	}
+
+	codeLine := lines[1]
+	stripped := ansi.Strip(codeLine)
+	if codeLine != stripped {
+		t.Fatalf("unknown file context line should be plain text, got %q", codeLine)
+	}
+}
+
+// TestDiffDisplayLinesWrappedContinuationHighlighted verifies wrapped code
+// segments keep continuation prefixes while still getting syntax colors.
+func TestDiffDisplayLinesWrappedContinuationHighlighted(t *testing.T) {
+	file := &internal.FileDiff{
+		Path: "main.go",
+		Hunks: []internal.DiffHunk{{
+			Header:    "@@ -0,0 +1,1 @@",
+			StartLine: 1,
+			Lines: []internal.DiffLine{{
+				Type:    internal.LineAdd,
+				Content: "func veryLongFunctionName(parameterOne int, parameterTwo string) error {",
+			}},
+		}},
+	}
+
+	lines := diffDisplayLines(file, 30)
+	if len(lines) < 3 {
+		t.Fatalf("expected at least 3 lines (separator + first + continuation), got %d", len(lines))
+	}
+
+	first := lines[1]
+	firstStripped := ansi.Strip(first)
+	if !strings.HasPrefix(firstStripped, "+") {
+		t.Fatalf("first segment stripped = %q, want '+' prefix", firstStripped)
+	}
+	if len(first) <= len(firstStripped) {
+		t.Fatalf("first segment should contain ANSI codes")
+	}
+
+	continuation := lines[2]
+	continuationStripped := ansi.Strip(continuation)
+	if !strings.HasPrefix(continuationStripped, "  ") {
+		t.Fatalf("continuation stripped = %q, want '  ' indent", continuationStripped)
+	}
+	if len(continuation) <= len(continuationStripped) {
+		t.Fatalf("continuation segment should contain ANSI codes")
+	}
+}
+
+// TestCountWrappedDiffLinesMatchesRenderedLines verifies the lightweight line
+// counter stays in sync with actual rendered output for highlighted diffs.
+func TestCountWrappedDiffLinesMatchesRenderedLines(t *testing.T) {
+	file := &internal.FileDiff{
+		Path: "main.go",
+		Hunks: []internal.DiffHunk{{
+			Header:    "@@ -0,0 +1,2 @@",
+			StartLine: 1,
+			Lines: []internal.DiffLine{
+				{
+					Type:    internal.LineAdd,
+					Content: "func main() {",
+				},
+				{
+					Type:    internal.LineAdd,
+					Content: "fmt.Println(\"a very long string that should wrap across lines\")",
+				},
+			},
+		}},
+	}
+
+	width := 24
+	rendered := diffDisplayLines(file, width)
+	counted := countWrappedDiffLines(file, width)
+	if counted != len(rendered) {
+		t.Fatalf("counted lines = %d, want %d", counted, len(rendered))
+	}
+}
+
+// TestDisplayLineCacheReusesBuilderOutput verifies repeated requests for the
+// same file signature and width reuse cached visual lines.
+func TestDisplayLineCacheReusesBuilderOutput(t *testing.T) {
+	cache := newDisplayLineCache()
+	file := &internal.FileDiff{
+		Path: "main.go",
+		Hunks: []internal.DiffHunk{{
+			Header:    "@@ -0,0 +1,1 @@",
+			StartLine: 1,
+			Lines: []internal.DiffLine{{
+				Type:    internal.LineAdd,
+				Content: "func main() {",
+			}},
+		}},
+	}
+
+	builds := 0
+	first := cache.get(file, 80, func() []string {
+		builds++
+		return []string{"first"}
+	})
+	second := cache.get(file, 80, func() []string {
+		builds++
+		return []string{"second"}
+	})
+
+	if builds != 1 {
+		t.Fatalf("builds = %d, want 1", builds)
+	}
+	if !reflect.DeepEqual(second, first) {
+		t.Fatalf("cached lines = %#v, want %#v", second, first)
 	}
 }
