@@ -14,6 +14,27 @@ func file(path string, adds int) internal.FileDiff {
 	return internal.FileDiff{Path: path, AddCount: adds}
 }
 
+// fileWithHunks builds a FileDiff with textual hunks for scroll-behavior tests.
+func fileWithHunks(path string, hunks ...internal.DiffHunk) internal.FileDiff {
+	return internal.FileDiff{
+		Path:     path,
+		AddCount: len(hunks),
+		Hunks:    hunks,
+	}
+}
+
+// addHunk builds a one-line added hunk with a stable header and start line.
+func addHunk(startLine int, content string) internal.DiffHunk {
+	return internal.DiffHunk{
+		Header:    "@@ -0,0 +1,1 @@",
+		StartLine: startLine,
+		Lines: []internal.DiffLine{{
+			Type:    internal.LineAdd,
+			Content: content,
+		}},
+	}
+}
+
 // TestModelFollowSelectsLatestChanged verifies follow mode jumps to the latest changed path.
 func TestModelFollowSelectsLatestChanged(t *testing.T) {
 	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
@@ -857,5 +878,176 @@ func TestModelScrollOffsetStaysWithinContent(t *testing.T) {
 
 	if model.ScrollOffset != 0 {
 		t.Fatalf("ScrollOffset = %d, want 0", model.ScrollOffset)
+	}
+}
+
+// TestModelFollowScrollsToLatestChangedHunk verifies follow mode scrolls to
+// the newest changed hunk in the current file instead of resetting to top.
+func TestModelFollowScrollsToLatestChangedHunk(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		fileWithHunks("a.txt",
+			addHunk(10, "first change"),
+			addHunk(20, "second change"),
+		),
+	})
+	model.Width = 80
+	model.Height = 3
+
+	updated, _ := model.Update(FilesUpdatedMsg{
+		BaselineSHA: "sha",
+		Files: []internal.FileDiff{
+			fileWithHunks("a.txt",
+				addHunk(10, "first change"),
+				addHunk(20, "second change"),
+				addHunk(30, "latest change"),
+			),
+		},
+		ChangedPaths: []string{"a.txt"},
+	})
+
+	got := updated.(Model)
+	if got.ScrollOffset != 4 {
+		t.Fatalf("ScrollOffset = %d, want 4", got.ScrollOffset)
+	}
+}
+
+// TestModelRestoreFollowScrollsToAccumulatedChangedHunk verifies follow
+// restore uses the frozen baseline from when follow was paused.
+func TestModelRestoreFollowScrollsToAccumulatedChangedHunk(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		fileWithHunks("a.txt", addHunk(10, "a")),
+		fileWithHunks("b.txt", addHunk(10, "b")),
+		fileWithHunks("c.txt",
+			addHunk(10, "first change"),
+			addHunk(20, "second change"),
+		),
+	})
+	model.Width = 80
+	model.Height = 3
+	model.CurrentIdx = 1
+	model.FollowOn = false
+
+	updated, _ := model.Update(FilesUpdatedMsg{
+		BaselineSHA: "sha",
+		Files: []internal.FileDiff{
+			fileWithHunks("a.txt", addHunk(10, "a")),
+			fileWithHunks("b.txt", addHunk(10, "b")),
+			fileWithHunks("c.txt",
+				addHunk(10, "first change"),
+				addHunk(20, "second change"),
+				addHunk(30, "latest change"),
+			),
+		},
+		ChangedPaths: []string{"c.txt"},
+	})
+
+	restored, _ := updated.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	got := restored.(Model)
+	if got.CurrentIdx != 2 {
+		t.Fatalf("CurrentIdx = %d, want 2", got.CurrentIdx)
+	}
+	if got.ScrollOffset != 4 {
+		t.Fatalf("ScrollOffset = %d, want 4", got.ScrollOffset)
+	}
+}
+
+// TestModelRestoreFollowClampsChangedHunkOffset verifies follow restore keeps
+// the target hunk visible when the ideal offset would overshoot the viewport.
+func TestModelRestoreFollowClampsChangedHunkOffset(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		fileWithHunks("a.txt", addHunk(10, "a")),
+		fileWithHunks("b.txt",
+			addHunk(10, "first change"),
+			addHunk(20, "second change"),
+		),
+	})
+	model.Width = 80
+	model.Height = 5
+	model.CurrentIdx = 0
+	model.FollowOn = false
+
+	updated, _ := model.Update(FilesUpdatedMsg{
+		BaselineSHA: "sha",
+		Files: []internal.FileDiff{
+			fileWithHunks("a.txt", addHunk(10, "a")),
+			fileWithHunks("b.txt",
+				addHunk(10, "first change"),
+				addHunk(20, "second change"),
+				addHunk(30, "latest change"),
+			),
+		},
+		ChangedPaths: []string{"b.txt"},
+	})
+
+	restored, _ := updated.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	got := restored.(Model)
+	if got.ScrollOffset != 3 {
+		t.Fatalf("ScrollOffset = %d, want 3", got.ScrollOffset)
+	}
+}
+
+// TestModelFollowNoChangeKeepsScrollOffset verifies false watcher triggers do
+// not move the viewport when the current file content is unchanged.
+func TestModelFollowNoChangeKeepsScrollOffset(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		fileWithHunks("a.txt",
+			addHunk(10, "first change"),
+			addHunk(20, "second change"),
+		),
+	})
+	model.Width = 80
+	model.Height = 3
+	model.ScrollOffset = 2
+
+	updated, _ := model.Update(FilesUpdatedMsg{
+		BaselineSHA: "sha",
+		Files: []internal.FileDiff{
+			fileWithHunks("a.txt",
+				addHunk(10, "first change"),
+				addHunk(20, "second change"),
+			),
+		},
+		ChangedPaths: []string{"a.txt"},
+	})
+
+	got := updated.(Model)
+	if got.ScrollOffset != 2 {
+		t.Fatalf("ScrollOffset = %d, want 2", got.ScrollOffset)
+	}
+}
+
+// TestModelFollowFileSwitchWithoutHunkChangeScrollsTop verifies switching to a
+// different file without a new hunk falls back to the file top.
+func TestModelFollowFileSwitchWithoutHunkChangeScrollsTop(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		fileWithHunks("a.txt",
+			addHunk(10, "first change"),
+			addHunk(20, "second change"),
+		),
+		fileWithHunks("b.txt", addHunk(10, "stable change")),
+	})
+	model.Width = 80
+	model.Height = 5
+	model.CurrentIdx = 0
+	model.ScrollOffset = 2
+
+	updated, _ := model.Update(FilesUpdatedMsg{
+		BaselineSHA: "sha",
+		Files: []internal.FileDiff{
+			fileWithHunks("a.txt",
+				addHunk(10, "first change"),
+				addHunk(20, "second change"),
+			),
+			fileWithHunks("b.txt", addHunk(10, "stable change")),
+		},
+		ChangedPaths: []string{"b.txt"},
+	})
+
+	got := updated.(Model)
+	if got.CurrentIdx != 1 {
+		t.Fatalf("CurrentIdx = %d, want 1", got.CurrentIdx)
+	}
+	if got.ScrollOffset != 0 {
+		t.Fatalf("ScrollOffset = %d, want 0", got.ScrollOffset)
 	}
 }

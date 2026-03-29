@@ -22,6 +22,8 @@ type Model struct {
 	NewCount        int
 	NewFiles        map[string]bool
 	LastChangedPath string
+	// prevHunkSigs stores the previous follow baseline by file path.
+	prevHunkSigs    map[string][]uint64
 	Notification    string
 	notificationSeq int
 
@@ -43,13 +45,19 @@ type Model struct {
 
 // NewModel constructs the initial UI state.
 func NewModel(dirName, repoDir, baselineSHA string, files []internal.FileDiff) Model {
+	prevHunkSigs := make(map[string][]uint64, len(files))
+	for _, file := range files {
+		prevHunkSigs[file.Path] = hunkFingerprints(file.Hunks)
+	}
+
 	return Model{
-		DirName:     dirName,
-		RepoDir:     repoDir,
-		BaselineSHA: baselineSHA,
-		Files:       files,
-		FollowOn:    true,
-		NewFiles:    make(map[string]bool),
+		DirName:      dirName,
+		RepoDir:      repoDir,
+		BaselineSHA:  baselineSHA,
+		Files:        files,
+		FollowOn:     true,
+		NewFiles:     make(map[string]bool),
+		prevHunkSigs: prevHunkSigs,
 	}
 }
 
@@ -165,8 +173,15 @@ func (m Model) applyFilesUpdate(msg FilesUpdatedMsg) Model {
 			}
 		}
 		if target >= 0 {
+			targetPath := m.Files[target].Path
+			fileSwitched := targetPath != currentPath
+			targetHunkIdx := lastChangedHunkIndex(m.prevHunkSigs[targetPath], m.Files[target].Hunks)
 			m.CurrentIdx = target
-			m.ScrollOffset = 0
+			if targetHunkIdx >= 0 {
+				m.ScrollOffset = hunkVisualOffset(&m.Files[target], targetHunkIdx, m.Width)
+			} else if fileSwitched {
+				m.ScrollOffset = 0
+			}
 		} else {
 			// No changed file matched; try to stay on the current file.
 			anchored := false
@@ -231,6 +246,13 @@ func (m Model) applyFilesUpdate(msg FilesUpdatedMsg) Model {
 		m.NewFiles = make(map[string]bool)
 		m.LastChangedPath = ""
 		m.NewCount = 0
+	}
+
+	if m.FollowOn {
+		m.prevHunkSigs = make(map[string][]uint64, len(m.Files))
+		for _, file := range m.Files {
+			m.prevHunkSigs[file.Path] = hunkFingerprints(file.Hunks)
+		}
 	}
 
 	m.clampScrollOffset()
@@ -372,11 +394,22 @@ func (m Model) closeOverlay() Model {
 }
 
 func (m *Model) selectLatestPendingFile() {
+	currentPath := ""
+	if m.CurrentIdx >= 0 && m.CurrentIdx < len(m.Files) {
+		currentPath = m.Files[m.CurrentIdx].Path
+	}
+
 	if m.LastChangedPath != "" {
 		for i, file := range m.Files {
 			if file.Path == m.LastChangedPath {
 				m.CurrentIdx = i
-				m.ScrollOffset = 0
+				hunkIdx := lastChangedHunkIndex(m.prevHunkSigs[file.Path], file.Hunks)
+				if hunkIdx >= 0 {
+					m.ScrollOffset = hunkVisualOffset(&m.Files[i], hunkIdx, m.Width)
+				} else if file.Path != currentPath {
+					m.ScrollOffset = 0
+				}
+				m.clampScrollOffset()
 				return
 			}
 		}
@@ -385,10 +418,18 @@ func (m *Model) selectLatestPendingFile() {
 	for i := len(m.Files) - 1; i >= 0; i-- {
 		if m.NewFiles[m.Files[i].Path] {
 			m.CurrentIdx = i
-			m.ScrollOffset = 0
+			hunkIdx := lastChangedHunkIndex(m.prevHunkSigs[m.Files[i].Path], m.Files[i].Hunks)
+			if hunkIdx >= 0 {
+				m.ScrollOffset = hunkVisualOffset(&m.Files[i], hunkIdx, m.Width)
+			} else if m.Files[i].Path != currentPath {
+				m.ScrollOffset = 0
+			}
+			m.clampScrollOffset()
 			return
 		}
 	}
+
+	m.clampScrollOffset()
 }
 
 // clampScrollOffset keeps scroll state within the current diff viewport bounds.
