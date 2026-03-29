@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/Astro-Han/diffpane/internal"
@@ -34,6 +35,31 @@ func countVisualDiffLines(file *internal.FileDiff, width int) int {
 	return len(diffDisplayLines(file, width))
 }
 
+// renderSeparator builds a fixed-width hunk separator for the current viewport.
+func renderSeparator(startLine, width int) string {
+	const dash = "─"
+
+	plainSeparator := func() string {
+		count := width
+		if count < 1 {
+			count = 1
+		}
+		return StyleDim.Render(strings.Repeat(dash, count))
+	}
+
+	if startLine <= 1 {
+		return plainSeparator()
+	}
+
+	label := fmt.Sprintf(" L%d ", startLine)
+	minWidth := 2 + runewidth.StringWidth(label) + 2
+	if width < minWidth {
+		return plainSeparator()
+	}
+
+	return StyleDim.Render("──" + label + strings.Repeat(dash, width-runewidth.StringWidth("──"+label)))
+}
+
 // diffDisplayLines expands one file diff into the exact visual lines shown in the viewport.
 func diffDisplayLines(file *internal.FileDiff, width int) []string {
 	if file == nil {
@@ -45,7 +71,7 @@ func diffDisplayLines(file *internal.FileDiff, width int) []string {
 
 	var lines []string
 	for _, hunk := range file.Hunks {
-		lines = append(lines, StyleDim.Render(hunk.Header))
+		lines = append(lines, renderSeparator(hunk.StartLine, width))
 		for _, diffLine := range hunk.Lines {
 			switch diffLine.Type {
 			case internal.LineAdd:

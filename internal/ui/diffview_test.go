@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Astro-Han/diffpane/internal"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // TestWrapLineShort verifies lines shorter than the viewport stay untouched.
@@ -72,5 +73,134 @@ func TestRenderDiffViewCountsWrappedDisplayLines(t *testing.T) {
 	thirdLines := strings.Split(thirdPage, "\n")
 	if !strings.HasPrefix(thirdLines[0], "  ") {
 		t.Fatalf("third page should start with wrapped continuation, got %q", thirdLines[0])
+	}
+}
+
+func TestSeparatorLineWithLineNumber(t *testing.T) {
+	file := &internal.FileDiff{
+		Path: "test.go",
+		Hunks: []internal.DiffHunk{{
+			Header:    "@@ -10,3 +38,5 @@",
+			StartLine: 38,
+			Lines: []internal.DiffLine{{
+				Type:    internal.LineAdd,
+				Content: "hello",
+			}},
+		}},
+	}
+
+	lines := diffDisplayLines(file, 40)
+	separator := lines[0]
+	if !strings.Contains(separator, "L38") {
+		t.Fatalf("separator should contain L38, got %q", separator)
+	}
+	if !strings.Contains(separator, "──") {
+		t.Fatalf("separator should contain ── chars, got %q", separator)
+	}
+}
+
+func TestSeparatorLineNewFile(t *testing.T) {
+	file := &internal.FileDiff{
+		Path:   "new.go",
+		Status: internal.StatusAdded,
+		Hunks: []internal.DiffHunk{{
+			Header:    "@@ -0,0 +1,2 @@",
+			StartLine: 1,
+			Lines: []internal.DiffLine{{
+				Type:    internal.LineAdd,
+				Content: "hello",
+			}},
+		}},
+	}
+
+	lines := diffDisplayLines(file, 40)
+	separator := lines[0]
+	if strings.Contains(separator, "L1") {
+		t.Fatalf("new file separator should not contain L1, got %q", separator)
+	}
+	if !strings.Contains(separator, "──") {
+		t.Fatalf("separator should contain ── chars, got %q", separator)
+	}
+}
+
+func TestSeparatorLineDeletedFile(t *testing.T) {
+	file := &internal.FileDiff{
+		Path:   "old.go",
+		Status: internal.StatusDeleted,
+		Hunks: []internal.DiffHunk{{
+			Header:    "@@ -1,2 +0,0 @@",
+			StartLine: 0,
+			Lines: []internal.DiffLine{{
+				Type:    internal.LineDel,
+				Content: "goodbye",
+			}},
+		}},
+	}
+
+	lines := diffDisplayLines(file, 40)
+	separator := lines[0]
+	if strings.Contains(separator, "L0") {
+		t.Fatalf("deleted file separator should not contain L0, got %q", separator)
+	}
+	if !strings.Contains(separator, "──") {
+		t.Fatalf("separator should contain ── chars, got %q", separator)
+	}
+}
+
+func TestSeparatorLineNarrowWidth(t *testing.T) {
+	file := &internal.FileDiff{
+		Path: "test.go",
+		Hunks: []internal.DiffHunk{{
+			Header:    "@@ -1,3 +99999,5 @@",
+			StartLine: 99999,
+			Lines: []internal.DiffLine{{
+				Type:    internal.LineAdd,
+				Content: "x",
+			}},
+		}},
+	}
+
+	width := 10
+	lines := diffDisplayLines(file, width)
+	if len(lines) < 1 {
+		t.Fatal("expected at least 1 line")
+	}
+	if separatorWidth := lipgloss.Width(lines[0]); separatorWidth > width {
+		t.Fatalf("separator width = %d, want <= %d", separatorWidth, width)
+	}
+}
+
+func TestSeparatorLineMultiHunk(t *testing.T) {
+	file := &internal.FileDiff{
+		Path: "multi.go",
+		Hunks: []internal.DiffHunk{
+			{
+				Header:    "@@ -1,3 +10,5 @@",
+				StartLine: 10,
+				Lines: []internal.DiffLine{{
+					Type:    internal.LineAdd,
+					Content: "first",
+				}},
+			},
+			{
+				Header:    "@@ -20,3 +150,5 @@",
+				StartLine: 150,
+				Lines: []internal.DiffLine{{
+					Type:    internal.LineAdd,
+					Content: "second",
+				}},
+			},
+		},
+	}
+
+	lines := diffDisplayLines(file, 40)
+	separatorCount := 0
+	for _, line := range lines {
+		if strings.Contains(line, "──") {
+			separatorCount++
+		}
+	}
+	if separatorCount != 2 {
+		t.Fatalf("expected 2 separator lines, got %d", separatorCount)
 	}
 }
