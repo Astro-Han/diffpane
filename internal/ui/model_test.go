@@ -385,16 +385,16 @@ func TestModelResetCancelledByOtherKey(t *testing.T) {
 		t.Fatal("expected resetPending")
 	}
 
-	afterN, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-	got := afterN.(Model)
+	afterRight, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	got := afterRight.(Model)
 	if got.resetPending {
-		t.Fatal("resetPending should be false after n")
+		t.Fatal("resetPending should be false after right arrow")
 	}
 	if got.Notification != "" {
 		t.Fatalf("notification = %q, want empty", got.Notification)
 	}
 	if got.CurrentIdx != 1 {
-		t.Fatalf("CurrentIdx = %d, want 1 (n should navigate)", got.CurrentIdx)
+		t.Fatalf("CurrentIdx = %d, want 1 (right arrow should navigate)", got.CurrentIdx)
 	}
 }
 

@@ -269,7 +269,7 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 		}
 		m.clampScrollOffset()
 		return m, nil
-	case "n":
+	case "right":
 		if len(m.Files) > 1 {
 			m.clearFollowTarget()
 			m.CurrentIdx = (m.CurrentIdx + 1) % len(m.Files)
@@ -279,7 +279,7 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
-	case "p":
+	case "left":
 		if len(m.Files) > 1 {
 			m.clearFollowTarget()
 			m.CurrentIdx = (m.CurrentIdx - 1 + len(m.Files)) % len(m.Files)
@@ -345,12 +345,12 @@ func (m Model) handleOverlayKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-	case "j", "down", "n":
+	case "j", "down":
 		if m.OverlayCursor < len(m.OverlaySnapshot)-1 {
 			m.OverlayCursor++
 		}
 		return m, nil
-	case "k", "up", "p":
+	case "k", "up":
 		if m.OverlayCursor > 0 {
 			m.OverlayCursor--
 		}
