@@ -29,8 +29,8 @@ diffpane records your current git HEAD when it starts (the "baseline"). It watch
 
 | Key | Action |
 |-----|--------|
-| `j`/`k` | Scroll diff |
-| `n`/`p` | Next/prev file |
+| `j`/`k`/`↑`/`↓` | Scroll diff |
+| `←`/`→` | Next/prev file |
 | `f` | Toggle follow mode |
 | `Tab` | File list |
 | `q` | Quit |
