@@ -45,11 +45,6 @@ type Model struct {
 
 // NewModel constructs the initial UI state.
 func NewModel(dirName, repoDir, baselineSHA string, files []internal.FileDiff) Model {
-	prevHunkSigs := make(map[string][]uint64, len(files))
-	for _, file := range files {
-		prevHunkSigs[file.Path] = hunkFingerprints(file.Hunks)
-	}
-
 	return Model{
 		DirName:      dirName,
 		RepoDir:      repoDir,
@@ -57,7 +52,7 @@ func NewModel(dirName, repoDir, baselineSHA string, files []internal.FileDiff) M
 		Files:        files,
 		FollowOn:     true,
 		NewFiles:     make(map[string]bool),
-		prevHunkSigs: prevHunkSigs,
+		prevHunkSigs: buildPrevHunkSigs(files),
 	}
 }
 
@@ -173,15 +168,7 @@ func (m Model) applyFilesUpdate(msg FilesUpdatedMsg) Model {
 			}
 		}
 		if target >= 0 {
-			targetPath := m.Files[target].Path
-			fileSwitched := targetPath != currentPath
-			targetHunkIdx := lastChangedHunkIndex(m.prevHunkSigs[targetPath], m.Files[target].Hunks)
-			m.CurrentIdx = target
-			if targetHunkIdx >= 0 {
-				m.ScrollOffset = hunkVisualOffset(&m.Files[target], targetHunkIdx, m.Width)
-			} else if fileSwitched {
-				m.ScrollOffset = 0
-			}
+			m.setFollowTarget(target, currentPath)
 		} else {
 			// No changed file matched; try to stay on the current file.
 			anchored := false
@@ -249,10 +236,7 @@ func (m Model) applyFilesUpdate(msg FilesUpdatedMsg) Model {
 	}
 
 	if m.FollowOn {
-		m.prevHunkSigs = make(map[string][]uint64, len(m.Files))
-		for _, file := range m.Files {
-			m.prevHunkSigs[file.Path] = hunkFingerprints(file.Hunks)
-		}
+		m.prevHunkSigs = buildPrevHunkSigs(m.Files)
 	}
 
 	m.clampScrollOffset()
@@ -301,6 +285,7 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 		m.FollowOn = !m.FollowOn
 		if m.FollowOn {
 			m.selectLatestPendingFile()
+			m.prevHunkSigs = buildPrevHunkSigs(m.Files)
 			m.NewCount = 0
 			m.NewFiles = make(map[string]bool)
 		}
@@ -375,6 +360,7 @@ func (m Model) handleOverlayKey(key string) (tea.Model, tea.Cmd) {
 	case "f":
 		m.FollowOn = true
 		m.selectLatestPendingFile()
+		m.prevHunkSigs = buildPrevHunkSigs(m.Files)
 		m.NewCount = 0
 		m.NewFiles = make(map[string]bool)
 		return m.closeOverlay(), nil
@@ -402,14 +388,7 @@ func (m *Model) selectLatestPendingFile() {
 	if m.LastChangedPath != "" {
 		for i, file := range m.Files {
 			if file.Path == m.LastChangedPath {
-				m.CurrentIdx = i
-				hunkIdx := lastChangedHunkIndex(m.prevHunkSigs[file.Path], file.Hunks)
-				if hunkIdx >= 0 {
-					m.ScrollOffset = hunkVisualOffset(&m.Files[i], hunkIdx, m.Width)
-				} else if file.Path != currentPath {
-					m.ScrollOffset = 0
-				}
-				m.clampScrollOffset()
+				m.setFollowTarget(i, currentPath)
 				return
 			}
 		}
@@ -417,19 +396,43 @@ func (m *Model) selectLatestPendingFile() {
 
 	for i := len(m.Files) - 1; i >= 0; i-- {
 		if m.NewFiles[m.Files[i].Path] {
-			m.CurrentIdx = i
-			hunkIdx := lastChangedHunkIndex(m.prevHunkSigs[m.Files[i].Path], m.Files[i].Hunks)
-			if hunkIdx >= 0 {
-				m.ScrollOffset = hunkVisualOffset(&m.Files[i], hunkIdx, m.Width)
-			} else if m.Files[i].Path != currentPath {
-				m.ScrollOffset = 0
-			}
-			m.clampScrollOffset()
+			m.setFollowTarget(i, currentPath)
 			return
 		}
 	}
 
 	m.clampScrollOffset()
+}
+
+// setFollowTarget applies follow-mode scrolling rules for one selected file.
+func (m *Model) setFollowTarget(targetIdx int, currentPath string) {
+	file := &m.Files[targetIdx]
+	m.CurrentIdx = targetIdx
+
+	oldSigs, hadBaseline := m.prevHunkSigs[file.Path]
+	if !hadBaseline {
+		m.ScrollOffset = 0
+		m.clampScrollOffset()
+		return
+	}
+
+	hunkIdx := lastChangedHunkIndex(oldSigs, file.Hunks)
+	if hunkIdx >= 0 {
+		m.ScrollOffset = hunkVisualOffset(file, hunkIdx, m.Width)
+	} else if file.Path != currentPath {
+		m.ScrollOffset = 0
+	}
+
+	m.clampScrollOffset()
+}
+
+// buildPrevHunkSigs snapshots current file hunks for the next follow comparison.
+func buildPrevHunkSigs(files []internal.FileDiff) map[string][]uint64 {
+	prevHunkSigs := make(map[string][]uint64, len(files))
+	for _, file := range files {
+		prevHunkSigs[file.Path] = hunkFingerprints(file.Hunks)
+	}
+	return prevHunkSigs
 }
 
 // clampScrollOffset keeps scroll state within the current diff viewport bounds.

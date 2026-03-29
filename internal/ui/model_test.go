@@ -1051,3 +1051,99 @@ func TestModelFollowFileSwitchWithoutHunkChangeScrollsTop(t *testing.T) {
 		t.Fatalf("ScrollOffset = %d, want 0", got.ScrollOffset)
 	}
 }
+
+// TestModelRestoreFollowRefreshesBaseline verifies that after follow is
+// restored, a later false watcher trigger does not re-scroll to an already
+// consumed change.
+func TestModelRestoreFollowRefreshesBaseline(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		fileWithHunks("a.txt", addHunk(10, "a")),
+		fileWithHunks("b.txt", addHunk(10, "b")),
+		fileWithHunks("c.txt",
+			addHunk(10, "first change"),
+			addHunk(20, "second change"),
+		),
+	})
+	model.Width = 80
+	model.Height = 3
+	model.CurrentIdx = 1
+	model.FollowOn = false
+
+	withChange, _ := model.Update(FilesUpdatedMsg{
+		BaselineSHA: "sha",
+		Files: []internal.FileDiff{
+			fileWithHunks("a.txt", addHunk(10, "a")),
+			fileWithHunks("b.txt", addHunk(10, "b")),
+			fileWithHunks("c.txt",
+				addHunk(10, "first change"),
+				addHunk(20, "second change"),
+				addHunk(30, "latest change"),
+			),
+		},
+		ChangedPaths: []string{"c.txt"},
+	})
+
+	restored, _ := withChange.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	afterRestore := restored.(Model)
+	afterRestore.ScrollOffset = 1
+
+	falseTrigger, _ := afterRestore.Update(FilesUpdatedMsg{
+		BaselineSHA: "sha",
+		Files: []internal.FileDiff{
+			fileWithHunks("a.txt", addHunk(10, "a")),
+			fileWithHunks("b.txt", addHunk(10, "b")),
+			fileWithHunks("c.txt",
+				addHunk(10, "first change"),
+				addHunk(20, "second change"),
+				addHunk(30, "latest change"),
+			),
+		},
+		ChangedPaths: []string{"c.txt"},
+	})
+
+	got := falseTrigger.(Model)
+	if got.ScrollOffset != 1 {
+		t.Fatalf("ScrollOffset = %d, want 1", got.ScrollOffset)
+	}
+}
+
+// TestModelRestoreFollowNewFileScrollsTop verifies that restoring follow on a
+// newly appeared file resets the viewport to the top even if that file is
+// already selected while follow is paused.
+func TestModelRestoreFollowNewFileScrollsTop(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		fileWithHunks("a.txt", addHunk(10, "a")),
+		fileWithHunks("b.txt", addHunk(10, "b")),
+	})
+	model.Width = 80
+	model.Height = 3
+	model.CurrentIdx = 1
+	model.FollowOn = false
+
+	updated, _ := model.Update(FilesUpdatedMsg{
+		BaselineSHA: "sha",
+		Files: []internal.FileDiff{
+			fileWithHunks("a.txt", addHunk(10, "a")),
+			fileWithHunks("b.txt", addHunk(10, "b")),
+			fileWithHunks("c.txt",
+				addHunk(10, "first change"),
+				addHunk(20, "second change"),
+				addHunk(30, "latest change"),
+			),
+		},
+		ChangedPaths: []string{"c.txt"},
+	})
+
+	paused := updated.(Model)
+	paused.CurrentIdx = 2
+	paused.ScrollOffset = 2
+
+	restored, _ := paused.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	got := restored.(Model)
+	if got.CurrentIdx != 2 {
+		t.Fatalf("CurrentIdx = %d, want 2", got.CurrentIdx)
+	}
+	if got.ScrollOffset != 0 {
+		t.Fatalf("ScrollOffset = %d, want 0", got.ScrollOffset)
+	}
+}
