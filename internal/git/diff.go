@@ -163,8 +163,9 @@ func buildNewFileDiff(path, content string) internal.FileDiff {
 		Path:   path,
 		Status: internal.StatusAdded,
 		Hunks: []internal.DiffHunk{{
-			Header: fmt.Sprintf("@@ -0,0 +1,%d @@", addCount),
-			Lines:  diffLines,
+			Header:    fmt.Sprintf("@@ -0,0 +1,%d @@", addCount),
+			StartLine: 1,
+			Lines:     diffLines,
 		}},
 		AddCount: addCount,
 	}

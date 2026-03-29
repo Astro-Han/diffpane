@@ -168,3 +168,13 @@ func TestParseDiffStartLineMalformed(t *testing.T) {
 		t.Fatalf("StartLine = %d, want 0", files[0].Hunks[0].StartLine)
 	}
 }
+
+func TestBuildNewFileDiffStartLine(t *testing.T) {
+	diff := buildNewFileDiff("new.txt", "line1\nline2\n")
+	if len(diff.Hunks) != 1 {
+		t.Fatalf("hunk count = %d, want 1", len(diff.Hunks))
+	}
+	if diff.Hunks[0].StartLine != 1 {
+		t.Fatalf("StartLine = %d, want 1", diff.Hunks[0].StartLine)
+	}
+}
