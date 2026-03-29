@@ -31,6 +31,8 @@ type Model struct {
 	PendingUpdate    *FilesUpdatedMsg
 	// resetPending is true between first and second r press.
 	resetPending bool
+	// resetInFlight is true while an async manual reset command is running.
+	resetInFlight bool
 	// ResetBaseline resets the session baseline asynchronously from a tea.Cmd.
 	ResetBaseline func() (string, []internal.FileDiff, error)
 
@@ -67,18 +69,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.BaselineSHA = msg.NewSHA
 		m.Notification = "baseline reset"
 		m.resetPending = false
+		m.resetInFlight = false
 		m.NewCount = 0
 		m.NewFiles = make(map[string]bool)
 		m.LastChangedPath = ""
-		m = m.applyFilesUpdate(FilesUpdatedMsg{
+		updated, _ := m.handleFilesUpdated(FilesUpdatedMsg{
 			BaselineSHA: msg.NewSHA,
 			Files:       msg.Files,
 		})
+		m = updated.(Model)
 		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 			return ClearNotificationMsg{Expected: "baseline reset"}
 		})
 	case ManualResetFailedMsg:
 		m.resetPending = false
+		m.resetInFlight = false
 		m.Notification = "baseline reset failed"
 		if msg.Error != "" {
 			m.Notification += ": " + msg.Error
@@ -266,12 +271,17 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "r":
+		if m.resetInFlight {
+			return m, nil
+		}
 		if m.resetPending {
 			// Second press dispatches async reset without blocking Update.
 			m.resetPending = false
+			m.resetInFlight = true
 			m.Notification = ""
 			resetFn := m.ResetBaseline
 			if resetFn == nil {
+				m.resetInFlight = false
 				return m, nil
 			}
 			return m, func() tea.Msg {

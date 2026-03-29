@@ -527,6 +527,118 @@ func TestModelManualResetCanRunConsecutively(t *testing.T) {
 	}
 }
 
+// TestModelManualResetQueuesUpdateWhileOverlayOpen verifies reset results do
+// not mutate the underlying file list until the overlay closes.
+func TestModelManualResetQueuesUpdateWhileOverlayOpen(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "old-sha", []internal.FileDiff{
+		file("old-a.txt", 1),
+		file("old-b.txt", 1),
+	})
+	model.Width = 80
+	model.Height = 24
+	model.CurrentIdx = 1
+	model.ResetBaseline = func() (string, []internal.FileDiff, error) {
+		return "new-sha", []internal.FileDiff{file("new.txt", 2)}, nil
+	}
+
+	first, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	second, cmd := first.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	if cmd == nil {
+		t.Fatal("expected reset cmd")
+	}
+
+	opened, _ := second.(Model).Update(tea.KeyMsg{Type: tea.KeyTab})
+	withOverlay := opened.(Model)
+	if !withOverlay.OverlayOpen {
+		t.Fatal("expected overlay open")
+	}
+
+	afterMsg, _ := withOverlay.Update(ManualResetMsg{
+		NewSHA: "new-sha",
+		Files:  []internal.FileDiff{file("new.txt", 2)},
+	})
+	pending := afterMsg.(Model)
+	if pending.BaselineSHA != "new-sha" {
+		t.Fatalf("BaselineSHA = %q, want new-sha", pending.BaselineSHA)
+	}
+	if len(pending.Files) != 2 || pending.Files[0].Path != "old-a.txt" {
+		t.Fatalf("Files changed under overlay: %v", pending.Files)
+	}
+	if pending.PendingUpdate == nil {
+		t.Fatal("expected pending update while overlay stays open")
+	}
+	if len(pending.OverlaySnapshot) != 2 || pending.OverlaySnapshot[0].Path != "old-a.txt" {
+		t.Fatalf("OverlaySnapshot = %v, want old snapshot", pending.OverlaySnapshot)
+	}
+
+	closed, _ := pending.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	got := closed.(Model)
+	if len(got.Files) != 1 || got.Files[0].Path != "new.txt" {
+		t.Fatalf("Files = %v, want [new.txt]", got.Files)
+	}
+	if got.CurrentIdx != 0 {
+		t.Fatalf("CurrentIdx = %d, want 0 after clamping", got.CurrentIdx)
+	}
+}
+
+// TestModelManualResetIgnoresSecondRequestWhileInFlight verifies a second reset
+// cannot start before the previous async reset result returns.
+func TestModelManualResetIgnoresSecondRequestWhileInFlight(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "old-sha", []internal.FileDiff{
+		file("old.txt", 1),
+	})
+	model.Width = 80
+	model.Height = 24
+	callCount := 0
+	model.ResetBaseline = func() (string, []internal.FileDiff, error) {
+		callCount++
+		return "new-sha", []internal.FileDiff{file("new.txt", 1)}, nil
+	}
+
+	first, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	second, firstCmd := first.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	inFlight := second.(Model)
+	if firstCmd == nil {
+		t.Fatal("expected first reset cmd")
+	}
+	if !inFlight.resetInFlight {
+		t.Fatal("expected resetInFlight after dispatching reset")
+	}
+
+	third, secondCmd := inFlight.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	stillInFlight := third.(Model)
+	if secondCmd != nil {
+		t.Fatal("second reset should be ignored while first is in flight")
+	}
+	if !stillInFlight.resetInFlight {
+		t.Fatal("resetInFlight should stay true until result arrives")
+	}
+	if stillInFlight.resetPending {
+		t.Fatal("resetPending should stay false while request is in flight")
+	}
+	if callCount != 0 {
+		t.Fatalf("ResetBaseline should not run until cmd executes, got %d calls", callCount)
+	}
+
+	msg := firstCmd()
+	resetMsg, ok := msg.(ManualResetMsg)
+	if !ok {
+		t.Fatalf("message type = %T, want ManualResetMsg", msg)
+	}
+	if callCount != 1 {
+		t.Fatalf("ResetBaseline call count = %d, want 1", callCount)
+	}
+
+	afterReset, _ := stillInFlight.Update(resetMsg)
+	got := afterReset.(Model)
+	if got.resetInFlight {
+		t.Fatal("resetInFlight should clear after result")
+	}
+	if got.BaselineSHA != "new-sha" {
+		t.Fatalf("BaselineSHA = %q, want new-sha", got.BaselineSHA)
+	}
+}
+
 // TestRenderFooterIncludesResetKey verifies footer shows r reset.
 func TestRenderFooterIncludesResetKey(t *testing.T) {
 	footer := RenderFooter(true, "", 80)
