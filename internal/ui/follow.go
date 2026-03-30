@@ -40,17 +40,6 @@ func changedHunkIndices(oldSigs []uint64, newHunks []internal.DiffHunk) []int {
 	return changed
 }
 
-// lastChangedHunkIndex keeps legacy callers compiling until model follow logic
-// switches to highlighted-hunk state in a later TDD step.
-func lastChangedHunkIndex(oldSigs []uint64, newHunks []internal.DiffHunk) int {
-	changed := changedHunkIndices(oldSigs, newHunks)
-	if len(changed) == 0 {
-		return -1
-	}
-
-	return changed[len(changed)-1]
-}
-
 // hunkVisualOffset counts rendered rows before hunkIdx for follow-mode scrolling.
 func hunkVisualOffset(file *internal.FileDiff, hunkIdx, width int) int {
 	if file == nil || hunkIdx <= 0 {
