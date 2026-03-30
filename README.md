@@ -27,7 +27,7 @@ diffpane
 
 Split your terminal. Left: run your AI agent. Right: `diffpane` shows what changed.
 
-diffpane records your current git HEAD when it starts (the "baseline"). It watches for file changes and shows you a live unified diff of everything that changed since the baseline. When you `git commit`, the baseline auto-resets so you only see new changes.
+diffpane records your current git HEAD when it starts (the "baseline"). It watches for file changes and shows you a live unified diff of everything that changed since the baseline. The baseline stays fixed so you see cumulative session changes. Press `r` to manually reset it to the current HEAD.
 
 ## Keys
 
