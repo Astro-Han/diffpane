@@ -8,10 +8,11 @@ var (
 	// ColorDel colors deleted lines and counters.
 	ColorDel = lipgloss.AdaptiveColor{Light: "#cb2431", Dark: "#f85149"}
 	// BgAdd colors added-line backgrounds in true-color terminals.
-	// Dark value from OpenCode's catppuccin theme: "tinted gray" not pure green.
-	BgAdd = lipgloss.AdaptiveColor{Light: "#dafbe1", Dark: "#303A30"}
+	// ~3.0:1 contrast vs black; luminance-matched with BgDel.
+	BgAdd = lipgloss.AdaptiveColor{Light: "#dafbe1", Dark: "#286432"}
 	// BgDel colors deleted-line backgrounds in true-color terminals.
-	BgDel = lipgloss.AdaptiveColor{Light: "#ffebe9", Dark: "#3A3030"}
+	// ~2.9:1 contrast vs black; luminance-matched with BgAdd.
+	BgDel = lipgloss.AdaptiveColor{Light: "#ffebe9", Dark: "#903c3c"}
 	// ColorDim colors neutral metadata such as headers and footer text.
 	ColorDim = lipgloss.AdaptiveColor{Light: "#6a737d", Dark: "#8b949e"}
 

@@ -628,13 +628,9 @@ func TestCountWrappedDiffLinesMatchesRenderedLinesAfterGutterRefactor(t *testing
 // paint a full-width background in true-color terminals.
 func TestDiffDisplayLinesTrueColorPadsBackgroundAcrossViewport(t *testing.T) {
 	prevProfile := colorProfileFn
-	prevBg := hasDarkBackgroundFn
 	colorProfileFn = func() termenv.Profile { return termenv.TrueColor }
-	hasDarkBackgroundFn = func() bool { return true }
-	defer func() {
-		colorProfileFn = prevProfile
-		hasDarkBackgroundFn = prevBg
-	}()
+	defer func() { colorProfileFn = prevProfile }()
+	defer setThemeForTest(ThemeDark)()
 
 	file := &internal.FileDiff{
 		Path: "main.go",

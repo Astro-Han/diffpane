@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
@@ -24,21 +25,86 @@ var (
 	chromaStyleName string
 )
 
+// ThemeMode represents the resolved terminal theme.
+type ThemeMode int
+
+const (
+	// ThemeDark indicates a dark terminal background.
+	ThemeDark ThemeMode = iota
+	// ThemeLight indicates a light terminal background.
+	ThemeLight
+	// ThemeUnknown means detection failed; background colors are disabled.
+	ThemeUnknown
+)
+
 var (
 	// colorProfileFn is overrideable in tests so rendering can force a specific terminal profile.
 	colorProfileFn = termenv.ColorProfile
 	// hasDarkBackgroundFn is overrideable in tests so adaptive background colors resolve deterministically.
 	hasDarkBackgroundFn = termenv.HasDarkBackground
+	// resolvedTheme caches the theme decision for the session.
+	resolvedTheme     ThemeMode
+	resolvedThemeOnce sync.Once
 )
+
+// InitTheme resolves the terminal theme once at startup. Call before
+// starting the Bubble Tea program. Reads DIFFPANE_THEME env var
+// (light|dark) to override auto-detection.
+func InitTheme() {
+	resolvedThemeOnce.Do(resolveTheme)
+}
+
+// resolveTheme determines the theme from env var or termenv detection.
+func resolveTheme() {
+	switch os.Getenv("DIFFPANE_THEME") {
+	case "light":
+		resolvedTheme = ThemeLight
+	case "dark":
+		resolvedTheme = ThemeDark
+	default:
+		// Auto-detect: termenv queries the terminal via OSC 11.
+		// If the query succeeds, the result is reliable.
+		// If it fails (no response), termenv defaults to dark, which
+		// may be wrong. We check BackgroundColor() to see if the
+		// terminal actually responded.
+		bg := termenv.BackgroundColor()
+		if bg == nil || bg.Sequence(false) == "" {
+			// Terminal did not respond to background query.
+			resolvedTheme = ThemeUnknown
+		} else if hasDarkBackgroundFn() {
+			resolvedTheme = ThemeDark
+		} else {
+			resolvedTheme = ThemeLight
+		}
+	}
+}
+
+// GetTheme returns the resolved theme mode.
+func GetTheme() ThemeMode {
+	resolvedThemeOnce.Do(resolveTheme)
+	return resolvedTheme
+}
+
+// setThemeForTest overrides the resolved theme during tests.
+// Returns a restore function that must be deferred.
+func setThemeForTest(mode ThemeMode) func() {
+	prev := resolvedTheme
+	resolvedTheme = mode
+	// Mark as already resolved so sync.Once doesn't run resolveTheme.
+	resolvedThemeOnce.Do(func() {})
+	return func() { resolvedTheme = prev }
+}
 
 // getChromaStyleName returns the chroma style that best matches the terminal background.
 func getChromaStyleName() string {
 	chromaStyleOnce.Do(func() {
-		if hasDarkBackgroundFn() {
+		switch GetTheme() {
+		case ThemeLight:
+			chromaStyleName = "github"
+		default:
+			// Dark and Unknown both use monokai (safe default for dark terminals).
 			chromaStyleName = "monokai"
-			return
 		}
-		chromaStyleName = "github"
 	})
 
 	return chromaStyleName

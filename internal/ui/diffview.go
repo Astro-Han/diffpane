@@ -255,7 +255,11 @@ func highlightDiffSegment(segment, filename string) string {
 // styleDiffPrefix applies the existing add/delete color to the diff prefix
 // while leaving context-line prefixes unstyled.
 func styleDiffPrefix(prefix string, lineType internal.LineType) string {
-	if colorProfileFn() == termenv.Ascii || colorProfileFn() == termenv.TrueColor {
+	profile := colorProfileFn()
+	// TrueColor with known theme: prefix inherits background, no foreground color needed.
+	// Ascii: no ANSI codes at all.
+	// TrueColor with unknown theme: use foreground colors (same as ANSI256/ANSI).
+	if profile == termenv.Ascii || (profile == termenv.TrueColor && GetTheme() != ThemeUnknown) {
 		return prefix
 	}
 
@@ -320,13 +324,18 @@ func formatDisplayedLineNo(lineNo, width int) string {
 }
 
 // resolvedBgHex selects the light or dark adaptive color variant for the
-// current terminal background.
+// current terminal background. Returns empty string when theme is unknown,
+// which disables background coloring gracefully.
 func resolvedBgHex(color lipgloss.AdaptiveColor) string {
-	if hasDarkBackgroundFn() {
+	switch GetTheme() {
+	case ThemeDark:
 		return color.Dark
+	case ThemeLight:
+		return color.Light
+	default:
+		// Unknown theme: don't apply background to avoid wrong colors.
+		return ""
 	}
-
-	return color.Light
 }
 
 // renderDiffSegment assembles one visual row and applies low-color prefix

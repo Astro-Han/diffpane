@@ -39,6 +39,9 @@ type sessionBaselineState struct {
 
 // main starts the TUI and wires file-system events into diff recomputation.
 func main() {
+	// Resolve theme before Bubble Tea takes over terminal I/O.
+	ui.InitTheme()
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
