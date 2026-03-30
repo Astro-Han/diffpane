@@ -6,13 +6,17 @@ Watch what your AI agent is changing, in real-time, right next to your terminal.
 
 ## Install
 
-Download the latest binary from [Releases](https://github.com/Astro-Han/diffpane/releases).
+```bash
+brew install Astro-Han/tap/diffpane
+```
 
-Or build from source:
+Or with Go:
 
 ```bash
 go install github.com/Astro-Han/diffpane@latest
 ```
+
+Pre-built binaries are also available on the [Releases](https://github.com/Astro-Han/diffpane/releases) page.
 
 ## Usage
 
