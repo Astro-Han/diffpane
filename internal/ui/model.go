@@ -18,17 +18,17 @@ type Model struct {
 	Files      []internal.FileDiff
 	CurrentIdx int
 
-	FollowOn        bool
-	ScrollOffset    int
-	hunkSigs        map[string][]uint64
-	highlightedHunks map[string]map[int]bool
-	lastChangedPath string
+	FollowOn            bool
+	ScrollOffset        int
+	hunkSigs            map[string][]uint64
+	highlightedHunks    map[string]map[int]bool
+	lastChangedPath     string
 	lastHighlightedPath string
 	// followTargetPath/hunk track the last auto-follow target for resize recalculation.
 	followTargetPath string
 	followTargetHunk int
-	Notification    string
-	notificationSeq int
+	Notification     string
+	notificationSeq  int
 
 	OverlayOpen      bool
 	OverlayCursor    int
@@ -52,14 +52,14 @@ type Model struct {
 // NewModel constructs the initial UI state.
 func NewModel(dirName, repoDir, baselineSHA string, files []internal.FileDiff) Model {
 	return Model{
-		DirName:      dirName,
-		RepoDir:      repoDir,
-		BaselineSHA:  baselineSHA,
-		Files:        files,
-		FollowOn:     true,
-		hunkSigs:     buildPrevHunkSigs(files),
+		DirName:          dirName,
+		RepoDir:          repoDir,
+		BaselineSHA:      baselineSHA,
+		Files:            files,
+		FollowOn:         true,
+		hunkSigs:         buildPrevHunkSigs(files),
 		highlightedHunks: make(map[string]map[int]bool),
-		displayCache: newDisplayLineCache(),
+		displayCache:     newDisplayLineCache(),
 	}
 }
 
@@ -349,12 +349,14 @@ func (m Model) handleOverlayKey(key string) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) closeOverlay() Model {
+	pending := m.PendingUpdate
 	m.OverlayOpen = false
 	m.OverlaySnapshot = nil
-	if m.PendingUpdate != nil && (m.PendingUpdate.BaselineSHA == "" || m.PendingUpdate.BaselineSHA == m.BaselineSHA) {
-		m = m.applyFilesUpdate(*m.PendingUpdate)
-	}
 	m.PendingUpdate = nil
+	if pending != nil && (pending.BaselineSHA == "" || pending.BaselineSHA == m.BaselineSHA) {
+		updated, _ := m.handleFilesUpdated(*pending)
+		m = updated.(Model)
+	}
 	return m
 }
 

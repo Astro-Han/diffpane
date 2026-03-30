@@ -244,6 +244,48 @@ func TestModelOverlayAppliesLatestQueuedSnapshot(t *testing.T) {
 	}
 }
 
+// TestModelOverlayIgnoresNetNoopQueuedSnapshot verifies that closing overlay
+// does not reset view state when queued updates end on the frozen snapshot.
+func TestModelOverlayIgnoresNetNoopQueuedSnapshot(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		file("a.txt", 1),
+	})
+	model.ScrollOffset = 2
+
+	opened, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	withOverlay := opened.(Model)
+	if !withOverlay.OverlayOpen {
+		t.Fatal("expected overlay to be open")
+	}
+
+	queuedChanged, _ := withOverlay.Update(FilesUpdatedMsg{
+		BaselineSHA: "sha",
+		Files: []internal.FileDiff{
+			file("a.txt", 2),
+		},
+		ChangedPaths: []string{"a.txt"},
+	})
+	withPending := queuedChanged.(Model)
+
+	queuedRestored, _ := withPending.Update(FilesUpdatedMsg{
+		BaselineSHA: "sha",
+		Files: []internal.FileDiff{
+			file("a.txt", 1),
+		},
+		ChangedPaths: []string{"a.txt"},
+	})
+	restoredPending := queuedRestored.(Model)
+
+	closed, _ := restoredPending.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	final := closed.(Model)
+	if final.ScrollOffset != 2 {
+		t.Fatalf("ScrollOffset = %d, want 2 after net no-op queue", final.ScrollOffset)
+	}
+	if final.lastChangedPath != "" || final.lastHighlightedPath != "" {
+		t.Fatalf("last paths = %q/%q, want empty after net no-op queue", final.lastChangedPath, final.lastHighlightedPath)
+	}
+}
+
 // TestModelIgnoresStaleFilesUpdate verifies out-of-date baseline updates do not overwrite state.
 func TestModelIgnoresStaleFilesUpdate(t *testing.T) {
 	model := NewModel("repo", "/tmp/repo", "new-sha", []internal.FileDiff{
