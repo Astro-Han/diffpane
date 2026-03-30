@@ -4,6 +4,8 @@ Real-time TUI diff viewer for AI coding agents.
 
 Watch what your AI agent is changing, in real-time, right next to your terminal.
 
+<img src="demo.gif" alt="diffpane demo" width="540" />
+
 ## Install
 
 ```bash
