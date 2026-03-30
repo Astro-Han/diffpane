@@ -19,14 +19,16 @@ type Model struct {
 
 	FollowOn        bool
 	ScrollOffset    int
+	hunkSigs        map[string][]uint64
+	highlightedHunks map[string]map[int]bool
+	lastChangedPath string
+	lastHighlightedPath string
 	NewCount        int
 	NewFiles        map[string]bool
 	LastChangedPath string
 	// followTargetPath/hunk track the last auto-follow target for resize recalculation.
 	followTargetPath string
 	followTargetHunk int
-	// prevHunkSigs stores the previous follow baseline by file path.
-	prevHunkSigs    map[string][]uint64
 	Notification    string
 	notificationSeq int
 
@@ -57,8 +59,9 @@ func NewModel(dirName, repoDir, baselineSHA string, files []internal.FileDiff) M
 		BaselineSHA:  baselineSHA,
 		Files:        files,
 		FollowOn:     true,
+		hunkSigs:     buildPrevHunkSigs(files),
+		highlightedHunks: make(map[string]map[int]bool),
 		NewFiles:     make(map[string]bool),
-		prevHunkSigs: buildPrevHunkSigs(files),
 		displayCache: newDisplayLineCache(),
 	}
 }
@@ -82,9 +85,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Notification = "baseline reset"
 		m.resetPending = false
 		m.resetInFlight = false
+		m.hunkSigs = buildPrevHunkSigs(msg.Files)
+		m.highlightedHunks = make(map[string]map[int]bool)
+		m.lastChangedPath = ""
+		m.lastHighlightedPath = ""
 		m.NewCount = 0
 		m.NewFiles = make(map[string]bool)
 		m.LastChangedPath = ""
+		m.clearFollowTarget()
 		// Manual reset starts a new baseline epoch, so any queued pre-reset
 		// update must be replaced rather than merged.
 		if m.OverlayOpen {
@@ -162,91 +170,52 @@ func (m Model) applyFilesUpdate(msg FilesUpdatedMsg) Model {
 	}
 
 	m.Files = msg.Files
+	m.highlightedHunks = make(map[string]map[int]bool, len(m.Files))
 
-	if m.FollowOn && len(m.Files) > 0 {
-		// Try to follow the most recently changed file that still exists in the list.
-		target := -1
-	findTarget:
-		for i := len(msg.ChangedPaths) - 1; i >= 0; i-- {
-			for j, file := range m.Files {
-				if file.Path == msg.ChangedPaths[i] {
-					target = j
-					break findTarget
-				}
-			}
+	for _, file := range m.Files {
+		changed := changedHunkIndices(m.hunkSigs[file.Path], file.Hunks)
+		if len(changed) == 0 {
+			continue
 		}
-		if target >= 0 {
-			m.setFollowTarget(target, currentPath)
-		} else {
-			// No changed file matched; try to stay on the current file.
-			anchored := false
-			for i, file := range m.Files {
-				if file.Path == currentPath {
-					m.CurrentIdx = i
-					anchored = true
-					break
-				}
-			}
-			if !anchored {
-				// Current file disappeared; clamp to adjacent position.
-				if m.CurrentIdx >= len(m.Files) {
-					m.CurrentIdx = len(m.Files) - 1
-				}
-				m.ScrollOffset = 0
-			}
+		hunks := make(map[int]bool, len(changed))
+		for _, idx := range changed {
+			hunks[idx] = true
 		}
-		m.NewFiles = make(map[string]bool)
-		m.LastChangedPath = ""
-		m.NewCount = 0
-	} else if !m.FollowOn {
-		presentPaths := make(map[string]bool, len(m.Files))
-		for _, file := range m.Files {
-			presentPaths[file.Path] = true
-		}
-		for path := range m.NewFiles {
-			if !presentPaths[path] || path == currentPath {
-				delete(m.NewFiles, path)
-			}
-		}
-		for _, changedPath := range msg.ChangedPaths {
-			if changedPath != currentPath && presentPaths[changedPath] {
-				m.NewFiles[changedPath] = true
-				m.LastChangedPath = changedPath
-			}
-		}
-		if m.LastChangedPath != "" && !m.NewFiles[m.LastChangedPath] {
-			m.LastChangedPath = ""
-		}
-		m.NewCount = len(m.NewFiles)
-
-		found := false
-		for i, file := range m.Files {
-			if file.Path == currentPath {
-				m.CurrentIdx = i
-				found = true
-				break
-			}
-		}
-		if !found && len(m.Files) > 0 {
-			if m.CurrentIdx >= len(m.Files) {
-				m.CurrentIdx = len(m.Files) - 1
-			}
-			m.ScrollOffset = 0
-		}
+		m.highlightedHunks[file.Path] = hunks
 	}
+
+	m.lastChangedPath = lastChangedPathInFiles(msg.ChangedPaths, m.Files)
+	m.lastHighlightedPath = lastHighlightedPathInFiles(msg.ChangedPaths, m.highlightedHunks, m.Files)
+	m.LastChangedPath = m.lastChangedPath
+	m.NewCount = 0
+	m.NewFiles = make(map[string]bool)
 
 	if len(m.Files) == 0 {
 		m.CurrentIdx = 0
 		m.ScrollOffset = 0
+		m.hunkSigs = make(map[string][]uint64)
+		m.highlightedHunks = make(map[string]map[int]bool)
+		m.lastChangedPath = ""
+		m.lastHighlightedPath = ""
 		m.NewFiles = make(map[string]bool)
 		m.LastChangedPath = ""
 		m.NewCount = 0
+		m.clearFollowTarget()
+		m.clampScrollOffset()
+		return m
 	}
 
 	if m.FollowOn {
-		m.prevHunkSigs = buildPrevHunkSigs(m.Files)
+		if idx := fileIndexByPath(m.Files, m.lastChangedPath); idx >= 0 {
+			m.setFollowTarget(idx, currentPath)
+		} else {
+			m.anchorCurrentPath(currentPath)
+		}
+	} else {
+		m.anchorCurrentPath(currentPath)
 	}
 
+	m.hunkSigs = buildPrevHunkSigs(m.Files)
 	m.clampScrollOffset()
 	return m
 }
@@ -297,9 +266,6 @@ func (m Model) handleKey(key string) (tea.Model, tea.Cmd) {
 		m.FollowOn = !m.FollowOn
 		if m.FollowOn {
 			m.selectLatestPendingFile()
-			m.prevHunkSigs = buildPrevHunkSigs(m.Files)
-			m.NewCount = 0
-			m.NewFiles = make(map[string]bool)
 		}
 		return m, nil
 	case "r":
@@ -373,9 +339,6 @@ func (m Model) handleOverlayKey(key string) (tea.Model, tea.Cmd) {
 	case "f":
 		m.FollowOn = true
 		m.selectLatestPendingFile()
-		m.prevHunkSigs = buildPrevHunkSigs(m.Files)
-		m.NewCount = 0
-		m.NewFiles = make(map[string]bool)
 		return m.closeOverlay(), nil
 	}
 
@@ -398,27 +361,14 @@ func (m *Model) selectLatestPendingFile() {
 		currentPath = m.Files[m.CurrentIdx].Path
 	}
 
-	if m.LastChangedPath != "" {
-		for i, file := range m.Files {
-			if file.Path == m.LastChangedPath {
-				m.setFollowTarget(i, currentPath)
-				return
-			}
-		}
-	}
-
-	for i := len(m.Files) - 1; i >= 0; i-- {
-		if m.NewFiles[m.Files[i].Path] {
-			m.setFollowTarget(i, currentPath)
-			return
-		}
-	}
-
-	if m.CurrentIdx >= 0 && m.CurrentIdx < len(m.Files) {
-		m.setFollowTarget(m.CurrentIdx, currentPath)
+	if idx := fileIndexByPath(m.Files, m.lastHighlightedPath); idx >= 0 {
+		m.setFollowTarget(idx, currentPath)
 		return
 	}
-
+	if idx := fileIndexByPath(m.Files, m.lastChangedPath); idx >= 0 {
+		m.setFollowTarget(idx, currentPath)
+		return
+	}
 	m.clampScrollOffset()
 }
 
@@ -427,20 +377,12 @@ func (m *Model) setFollowTarget(targetIdx int, currentPath string) {
 	file := &m.Files[targetIdx]
 	m.CurrentIdx = targetIdx
 
-	oldSigs, hadBaseline := m.prevHunkSigs[file.Path]
-	if !hadBaseline {
-		m.clearFollowTarget()
-		m.ScrollOffset = 0
-		m.clampScrollOffset()
-		return
-	}
-
-	hunkIdx := lastChangedHunkIndex(oldSigs, file.Hunks)
-	if hunkIdx >= 0 {
+	if hunkIdx, ok := maxHighlightedHunkIndex(m.highlightedHunks[file.Path]); ok {
 		m.ScrollOffset = hunkVisualOffset(file, hunkIdx, m.Width)
 		m.followTargetPath = file.Path
 		m.followTargetHunk = hunkIdx
-	} else if file.Path != currentPath {
+	} else {
+		_ = currentPath
 		m.clearFollowTarget()
 		m.ScrollOffset = 0
 	}
@@ -452,6 +394,23 @@ func (m *Model) setFollowTarget(targetIdx int, currentPath string) {
 func (m *Model) clearFollowTarget() {
 	m.followTargetPath = ""
 	m.followTargetHunk = -1
+}
+
+func (m *Model) anchorCurrentPath(currentPath string) {
+	found := false
+	for i, file := range m.Files {
+		if file.Path == currentPath {
+			m.CurrentIdx = i
+			found = true
+			break
+		}
+	}
+	if !found && len(m.Files) > 0 {
+		if m.CurrentIdx >= len(m.Files) {
+			m.CurrentIdx = len(m.Files) - 1
+		}
+		m.ScrollOffset = 0
+	}
 }
 
 // realignFollowTarget recomputes the stored follow target after width changes.
@@ -480,6 +439,53 @@ func buildPrevHunkSigs(files []internal.FileDiff) map[string][]uint64 {
 		prevHunkSigs[file.Path] = hunkFingerprints(file.Hunks)
 	}
 	return prevHunkSigs
+}
+
+func fileIndexByPath(files []internal.FileDiff, path string) int {
+	if path == "" {
+		return -1
+	}
+	for i, file := range files {
+		if file.Path == path {
+			return i
+		}
+	}
+	return -1
+}
+
+func lastChangedPathInFiles(changedPaths []string, files []internal.FileDiff) string {
+	for i := len(changedPaths) - 1; i >= 0; i-- {
+		if fileIndexByPath(files, changedPaths[i]) >= 0 {
+			return changedPaths[i]
+		}
+	}
+	return ""
+}
+
+func lastHighlightedPathInFiles(changedPaths []string, highlighted map[string]map[int]bool, files []internal.FileDiff) string {
+	for i := len(changedPaths) - 1; i >= 0; i-- {
+		path := changedPaths[i]
+		if fileIndexByPath(files, path) < 0 {
+			continue
+		}
+		if len(highlighted[path]) > 0 {
+			return path
+		}
+	}
+	return ""
+}
+
+func maxHighlightedHunkIndex(highlighted map[int]bool) (int, bool) {
+	if len(highlighted) == 0 {
+		return -1, false
+	}
+	maxIdx := -1
+	for idx := range highlighted {
+		if idx > maxIdx {
+			maxIdx = idx
+		}
+	}
+	return maxIdx, true
 }
 
 // clampScrollOffset keeps scroll state within the current diff viewport bounds.

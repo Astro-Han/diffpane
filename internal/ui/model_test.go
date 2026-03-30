@@ -84,8 +84,9 @@ func TestModelFollowUsesMostRecentChangedPath(t *testing.T) {
 	}
 }
 
-// TestModelPausedFollowTracksNewFiles verifies paused follow accumulates new unique files.
-func TestModelPausedFollowTracksNewFiles(t *testing.T) {
+// TestModelPausedFollowTracksLastChangedPath verifies paused follow keeps the
+// current file selected and records the latest changed path without +N state.
+func TestModelPausedFollowTracksLastChangedPath(t *testing.T) {
 	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
 		file("a.txt", 1),
 		file("b.txt", 1),
@@ -106,11 +107,11 @@ func TestModelPausedFollowTracksNewFiles(t *testing.T) {
 	if got.CurrentIdx != 0 {
 		t.Fatalf("CurrentIdx = %d, want 0", got.CurrentIdx)
 	}
-	if got.NewCount != 1 {
-		t.Fatalf("NewCount = %d, want 1", got.NewCount)
+	if got.NewCount != 0 {
+		t.Fatalf("NewCount = %d, want 0", got.NewCount)
 	}
-	if !got.NewFiles["c.txt"] {
-		t.Fatal("expected c.txt to be tracked as new")
+	if got.lastChangedPath != "c.txt" {
+		t.Fatalf("lastChangedPath = %q, want c.txt", got.lastChangedPath)
 	}
 }
 
@@ -136,6 +137,32 @@ func TestModelPausedFollowIgnoresVanishedChangedPaths(t *testing.T) {
 	}
 	if len(got.NewFiles) != 0 {
 		t.Fatalf("NewFiles = %#v, want empty", got.NewFiles)
+	}
+}
+
+// TestModelPausedFollowHighlightsCurrentFileWithoutNavigation verifies paused
+// follow still refreshes highlight state for the current file without moving selection.
+func TestModelPausedFollowHighlightsCurrentFileWithoutNavigation(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		fileWithHunks("a.txt", addHunk(1, "old")),
+	})
+	model.FollowOn = false
+	model.CurrentIdx = 0
+
+	updated, _ := model.Update(FilesUpdatedMsg{
+		BaselineSHA: "sha",
+		Files: []internal.FileDiff{
+			fileWithHunks("a.txt", addHunk(1, "old"), addHunk(2, "new")),
+		},
+		ChangedPaths: []string{"a.txt"},
+	})
+
+	got := updated.(Model)
+	if got.CurrentIdx != 0 {
+		t.Fatalf("CurrentIdx = %d, want 0", got.CurrentIdx)
+	}
+	if !got.highlightedHunks["a.txt"][1] {
+		t.Fatalf("highlightedHunks = %#v, want hunk 1 highlighted", got.highlightedHunks)
 	}
 }
 
@@ -199,14 +226,14 @@ func TestModelIgnoresStaleFilesUpdate(t *testing.T) {
 // immediately selects the latest pending file instead of waiting for another fs event.
 func TestModelRestoreFollowJumpsToLatestChanged(t *testing.T) {
 	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
-		file("a.txt", 1),
-		file("b.txt", 1),
-		file("c.txt", 1),
+		fileWithHunks("a.txt", addHunk(1, "a")),
+		fileWithHunks("b.txt", addHunk(1, "b")),
+		fileWithHunks("c.txt", addHunk(1, "c")),
 	})
 	model.FollowOn = false
 	model.CurrentIdx = 0
-	model.NewFiles["c.txt"] = true
-	model.NewCount = 1
+	model.lastHighlightedPath = "c.txt"
+	model.highlightedHunks = map[string]map[int]bool{"c.txt": {0: true}}
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
 	got := updated.(Model)
@@ -245,6 +272,28 @@ func TestModelRestoreFollowUsesMostRecentChangedPath(t *testing.T) {
 	got := restored.(Model)
 	if got.CurrentIdx != 1 {
 		t.Fatalf("CurrentIdx = %d, want 1 for most recent path b.txt", got.CurrentIdx)
+	}
+}
+
+// TestModelRestoreFollowFallsBackToLastChangedPath verifies follow resume still
+// returns to the latest changed file when no visible highlighted hunk exists.
+func TestModelRestoreFollowFallsBackToLastChangedPath(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		fileWithHunks("a.txt", addHunk(1, "old")),
+	})
+	model.FollowOn = false
+	model.lastChangedPath = "a.txt"
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	got := updated.(Model)
+	if !got.FollowOn {
+		t.Fatal("expected follow to be restored")
+	}
+	if got.CurrentIdx != 0 {
+		t.Fatalf("CurrentIdx = %d, want 0", got.CurrentIdx)
+	}
+	if got.ScrollOffset != 0 {
+		t.Fatalf("ScrollOffset = %d, want 0", got.ScrollOffset)
 	}
 }
 
@@ -363,6 +412,37 @@ func TestModelManualResetDoublePressR(t *testing.T) {
 	}
 	if got.Notification != "baseline reset" {
 		t.Fatalf("notification = %q, want 'baseline reset'", got.Notification)
+	}
+}
+
+// TestModelManualResetClearsHighlightStateAndFollowAnchor verifies reset starts
+// a fresh highlight epoch and removes any resize anchor.
+func TestModelManualResetClearsHighlightStateAndFollowAnchor(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "old-sha", []internal.FileDiff{
+		fileWithHunks("a.txt", addHunk(1, "old")),
+	})
+	model.highlightedHunks = map[string]map[int]bool{"a.txt": {0: true}}
+	model.lastChangedPath = "a.txt"
+	model.lastHighlightedPath = "a.txt"
+	model.followTargetPath = "a.txt"
+	model.followTargetHunk = 0
+
+	afterReset, _ := model.Update(ManualResetMsg{
+		NewSHA: "new-sha",
+		Files:  []internal.FileDiff{fileWithHunks("a.txt", addHunk(1, "old"))},
+	})
+	got := afterReset.(Model)
+	if len(got.highlightedHunks) != 0 {
+		t.Fatalf("highlightedHunks = %#v, want empty after reset", got.highlightedHunks)
+	}
+	if got.lastChangedPath != "" {
+		t.Fatalf("lastChangedPath = %q, want empty", got.lastChangedPath)
+	}
+	if got.lastHighlightedPath != "" {
+		t.Fatalf("lastHighlightedPath = %q, want empty", got.lastHighlightedPath)
+	}
+	if got.followTargetPath != "" || got.followTargetHunk != -1 {
+		t.Fatalf("follow target = %q/%d, want cleared", got.followTargetPath, got.followTargetHunk)
 	}
 }
 
@@ -986,9 +1066,9 @@ func TestModelRestoreFollowClampsChangedHunkOffset(t *testing.T) {
 	}
 }
 
-// TestModelFollowNoChangeKeepsScrollOffset verifies false watcher triggers do
-// not move the viewport when the current file content is unchanged.
-func TestModelFollowNoChangeKeepsScrollOffset(t *testing.T) {
+// TestModelFollowNoChangeForChangedPathScrollsTop verifies explicit changed-path
+// batches without visible highlighted hunks fall back to the file top.
+func TestModelFollowNoChangeForChangedPathScrollsTop(t *testing.T) {
 	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
 		fileWithHunks("a.txt",
 			addHunk(10, "first change"),
@@ -1011,8 +1091,8 @@ func TestModelFollowNoChangeKeepsScrollOffset(t *testing.T) {
 	})
 
 	got := updated.(Model)
-	if got.ScrollOffset != 2 {
-		t.Fatalf("ScrollOffset = %d, want 2", got.ScrollOffset)
+	if got.ScrollOffset != 0 {
+		t.Fatalf("ScrollOffset = %d, want 0", got.ScrollOffset)
 	}
 }
 
@@ -1052,10 +1132,10 @@ func TestModelFollowFileSwitchWithoutHunkChangeScrollsTop(t *testing.T) {
 	}
 }
 
-// TestModelRestoreFollowRefreshesBaseline verifies that after follow is
-// restored, a later false watcher trigger does not re-scroll to an already
-// consumed change.
-func TestModelRestoreFollowRefreshesBaseline(t *testing.T) {
+// TestModelRestoreFollowFalseTriggerScrollsTop verifies that after follow is
+// restored, a later changed-path batch without visible highlighted hunks falls
+// back to the target file top.
+func TestModelRestoreFollowFalseTriggerScrollsTop(t *testing.T) {
 	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
 		fileWithHunks("a.txt", addHunk(10, "a")),
 		fileWithHunks("b.txt", addHunk(10, "b")),
@@ -1102,15 +1182,14 @@ func TestModelRestoreFollowRefreshesBaseline(t *testing.T) {
 	})
 
 	got := falseTrigger.(Model)
-	if got.ScrollOffset != 1 {
-		t.Fatalf("ScrollOffset = %d, want 1", got.ScrollOffset)
+	if got.ScrollOffset != 0 {
+		t.Fatalf("ScrollOffset = %d, want 0", got.ScrollOffset)
 	}
 }
 
-// TestModelRestoreFollowNewFileScrollsTop verifies that restoring follow on a
-// newly appeared file resets the viewport to the top even if that file is
-// already selected while follow is paused.
-func TestModelRestoreFollowNewFileScrollsTop(t *testing.T) {
+// TestModelRestoreFollowNewFileScrollsToLatestHighlightedHunk verifies that
+// restoring follow on a newly appeared file jumps to the last highlighted hunk.
+func TestModelRestoreFollowNewFileScrollsToLatestHighlightedHunk(t *testing.T) {
 	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
 		fileWithHunks("a.txt", addHunk(10, "a")),
 		fileWithHunks("b.txt", addHunk(10, "b")),
@@ -1143,8 +1222,8 @@ func TestModelRestoreFollowNewFileScrollsTop(t *testing.T) {
 	if got.CurrentIdx != 2 {
 		t.Fatalf("CurrentIdx = %d, want 2", got.CurrentIdx)
 	}
-	if got.ScrollOffset != 0 {
-		t.Fatalf("ScrollOffset = %d, want 0", got.ScrollOffset)
+	if got.ScrollOffset != 4 {
+		t.Fatalf("ScrollOffset = %d, want 4", got.ScrollOffset)
 	}
 }
 
