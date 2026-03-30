@@ -6,7 +6,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
+	gitpkg "github.com/Astro-Han/diffpane/internal/git"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -106,6 +108,122 @@ func TestAddDirRecursiveSkipsIgnoredDirectories(t *testing.T) {
 	}
 	if !containsPath(watched, filepath.Join(root, "src")) {
 		t.Fatalf("watch list should include normal directory, got %#v", watched)
+	}
+}
+
+// TestInfoExcludeChangesTriggerRefresh verifies watcher refreshes diffs when
+// repo-local exclude rules change.
+func TestInfoExcludeChangesTriggerRefresh(t *testing.T) {
+	root := t.TempDir()
+	runGit(t, root, "init")
+
+	changes, fw := startTestWatcher(t, root, filepath.Join(root, ".git"), filepath.Join(root, ".git"))
+	defer fw.Stop()
+
+	time.Sleep(100 * time.Millisecond)
+
+	excludePath := filepath.Join(root, ".git", "info", "exclude")
+	if err := os.WriteFile(excludePath, []byte("ignored.log\n"), 0o600); err != nil {
+		t.Fatalf("write exclude: %v", err)
+	}
+
+	paths := waitForPaths(t, changes, ".git/info/exclude refresh")
+	if !containsPath(paths, filepath.Join(".git", "info", "exclude")) {
+		t.Fatalf("changed paths = %#v, want .git/info/exclude", paths)
+	}
+}
+
+// TestInfoExcludeAtomicReplaceTriggersRefresh verifies editor-style atomic
+// replacement still refreshes diffs when exclude rules change.
+func TestInfoExcludeAtomicReplaceTriggersRefresh(t *testing.T) {
+	root := t.TempDir()
+	runGit(t, root, "init")
+
+	changes, fw := startTestWatcher(t, root, filepath.Join(root, ".git"), filepath.Join(root, ".git"))
+	defer fw.Stop()
+
+	time.Sleep(100 * time.Millisecond)
+
+	infoDir := filepath.Join(root, ".git", "info")
+	tempPath := filepath.Join(infoDir, "exclude.tmp")
+	excludePath := filepath.Join(infoDir, "exclude")
+	if err := os.WriteFile(tempPath, []byte("ignored.log\n"), 0o600); err != nil {
+		t.Fatalf("write temp exclude: %v", err)
+	}
+	if err := os.Rename(tempPath, excludePath); err != nil {
+		t.Fatalf("rename temp exclude: %v", err)
+	}
+
+	waitForPaths(t, changes, "atomic .git/info/exclude refresh")
+}
+
+// TestLinkedWorktreeCommonExcludeChangesTriggerRefresh verifies linked
+// worktrees refresh when the shared repo-local exclude file changes.
+func TestLinkedWorktreeCommonExcludeChangesTriggerRefresh(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init")
+	runGit(t, repo, "config", "user.name", "Test User")
+	runGit(t, repo, "config", "user.email", "test@example.com")
+	runGit(t, repo, "commit", "--allow-empty", "-m", "root")
+
+	worktrees := filepath.Join(t.TempDir(), "worktrees")
+	if err := os.MkdirAll(worktrees, 0o750); err != nil {
+		t.Fatalf("mkdir worktrees: %v", err)
+	}
+	worktreeDir := filepath.Join(worktrees, "linked")
+	runGit(t, repo, "worktree", "add", worktreeDir)
+
+	gitDir := gitpkg.ResolveGitDir(worktreeDir)
+	commonGitDir := gitpkg.GetGitCommonDir(worktreeDir)
+	changes, fw := startTestWatcher(t, worktreeDir, gitDir, commonGitDir)
+	defer fw.Stop()
+
+	time.Sleep(100 * time.Millisecond)
+
+	excludePath := filepath.Join(commonGitDir, "info", "exclude")
+	if err := os.WriteFile(excludePath, []byte("ignored.log\n"), 0o600); err != nil {
+		t.Fatalf("write common exclude: %v", err)
+	}
+
+	paths := waitForPaths(t, changes, "linked worktree .git/info/exclude refresh")
+	want, err := filepath.Rel(worktreeDir, excludePath)
+	if err != nil {
+		t.Fatalf("filepath.Rel: %v", err)
+	}
+	if !containsPath(paths, want) {
+		t.Fatalf("changed paths = %#v, want %q", paths, want)
+	}
+}
+
+func startTestWatcher(t *testing.T, repoDir, gitDir, commonGitDir string) (chan []string, *FileWatcher) {
+	t.Helper()
+
+	changes := make(chan []string, 1)
+	fw, err := New(
+		repoDir,
+		gitDir,
+		commonGitDir,
+		func(paths []string) {
+			changes <- append([]string(nil), paths...)
+		},
+		func() {},
+	)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	return changes, fw
+}
+
+func waitForPaths(t *testing.T, changes <-chan []string, label string) []string {
+	t.Helper()
+
+	select {
+	case paths := <-changes:
+		return paths
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for %s", label)
+		return nil
 	}
 }
 

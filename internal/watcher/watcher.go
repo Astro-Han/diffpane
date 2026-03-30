@@ -72,9 +72,11 @@ func New(repoDir, gitDir, commonGitDir string, onChange func([]string), onHead f
 		_ = watcher.fsw.Close()
 		return nil, err
 	}
+	watcher.addDirRecursive(filepath.Join(gitDir, "info"))
 	refsDir := filepath.Join(gitDir, "refs")
 	watcher.addDirRecursive(refsDir)
 	if commonGitDir != "" && commonGitDir != gitDir {
+		watcher.addDirRecursive(filepath.Join(commonGitDir, "info"))
 		commonRefsDir := filepath.Join(commonGitDir, "refs")
 		watcher.addDirRecursive(commonRefsDir)
 	}
@@ -92,7 +94,8 @@ func (fw *FileWatcher) loop() {
 			}
 
 			path := event.Name
-			if isGitInternalPath(path, fw.gitDir) || isGitInternalPath(path, fw.commonGitDir) {
+			refreshExclude := isGitInfoExcludePath(path, fw.gitDir) || isGitInfoExcludePath(path, fw.commonGitDir)
+			if !refreshExclude && (isGitInternalPath(path, fw.gitDir) || isGitInternalPath(path, fw.commonGitDir)) {
 				if isHeadOrRefPath(path, fw.gitDir) || isHeadOrRefPath(path, fw.commonGitDir) {
 					fw.headDebouncer.Trigger()
 				}
@@ -103,7 +106,7 @@ func (fw *FileWatcher) loop() {
 			if path == worktreeGit {
 				continue
 			}
-			if fw.isIgnored(path) {
+			if !refreshExclude && fw.isIgnored(path) {
 				continue
 			}
 
@@ -162,6 +165,16 @@ func isHeadOrRefPath(path, gitDir string) bool {
 	}
 
 	return rel == "HEAD" || strings.HasPrefix(rel, "refs")
+}
+
+// isGitInfoExcludePath returns true for the repo-local exclude file that must
+// trigger a diff refresh when ignore rules change.
+func isGitInfoExcludePath(path, gitDir string) bool {
+	if gitDir == "" {
+		return false
+	}
+
+	return path == filepath.Join(gitDir, "info", "exclude")
 }
 
 // isIgnored checks whether git would ignore this path.
