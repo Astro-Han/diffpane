@@ -115,97 +115,20 @@ func TestRenderDiffViewCountsWrappedDisplayLines(t *testing.T) {
 	}
 }
 
-func TestSeparatorLineWithLineNumber(t *testing.T) {
-	file := &internal.FileDiff{
-		Path: "test.go",
-		Hunks: []internal.DiffHunk{{
-			Header:    "@@ -10,3 +38,5 @@",
-			StartLine: 38,
-			Lines: []internal.DiffLine{{
-				Type:    internal.LineAdd,
-				Content: "hello",
-			}},
-		}},
+func TestRenderSeparatorIsAlwaysPlainDashes(t *testing.T) {
+	got := ansi.Strip(renderSeparator(24))
+	if strings.Contains(got, "L24") {
+		t.Fatalf("separator should not include a line-number label, got %q", got)
 	}
-
-	lines := diffDisplayLines(file, 40)
-	separator := lines[0]
-	if !strings.Contains(separator, "L38") {
-		t.Fatalf("separator should contain L38, got %q", separator)
-	}
-	if !strings.Contains(separator, "──") {
-		t.Fatalf("separator should contain ── chars, got %q", separator)
-	}
-}
-
-func TestSeparatorLineNewFile(t *testing.T) {
-	file := &internal.FileDiff{
-		Path:   "new.go",
-		Status: internal.StatusAdded,
-		Hunks: []internal.DiffHunk{{
-			Header:    "@@ -0,0 +1,2 @@",
-			StartLine: 1,
-			Lines: []internal.DiffLine{{
-				Type:    internal.LineAdd,
-				Content: "hello",
-			}},
-		}},
-	}
-
-	lines := diffDisplayLines(file, 40)
-	separator := lines[0]
-	if strings.Contains(separator, "L1") {
-		t.Fatalf("new file separator should not contain L1, got %q", separator)
-	}
-	if !strings.Contains(separator, "──") {
-		t.Fatalf("separator should contain ── chars, got %q", separator)
-	}
-}
-
-func TestSeparatorLineDeletedFile(t *testing.T) {
-	file := &internal.FileDiff{
-		Path:   "old.go",
-		Status: internal.StatusDeleted,
-		Hunks: []internal.DiffHunk{{
-			Header:    "@@ -1,2 +0,0 @@",
-			StartLine: 0,
-			Lines: []internal.DiffLine{{
-				Type:    internal.LineDel,
-				Content: "goodbye",
-			}},
-		}},
-	}
-
-	lines := diffDisplayLines(file, 40)
-	separator := lines[0]
-	if strings.Contains(separator, "L0") {
-		t.Fatalf("deleted file separator should not contain L0, got %q", separator)
-	}
-	if !strings.Contains(separator, "──") {
-		t.Fatalf("separator should contain ── chars, got %q", separator)
+	if got != strings.Repeat("─", 24) {
+		t.Fatalf("separator = %q, want 24 plain dashes", got)
 	}
 }
 
 func TestSeparatorLineNarrowWidth(t *testing.T) {
-	file := &internal.FileDiff{
-		Path: "test.go",
-		Hunks: []internal.DiffHunk{{
-			Header:    "@@ -1,3 +99999,5 @@",
-			StartLine: 99999,
-			Lines: []internal.DiffLine{{
-				Type:    internal.LineAdd,
-				Content: "x",
-			}},
-		}},
-	}
-
-	width := 10
-	lines := diffDisplayLines(file, width)
-	if len(lines) < 1 {
-		t.Fatal("expected at least 1 line")
-	}
-	if separatorWidth := lipgloss.Width(lines[0]); separatorWidth > width {
-		t.Fatalf("separator width = %d, want <= %d", separatorWidth, width)
+	got := ansi.Strip(renderSeparator(0))
+	if got != "─" {
+		t.Fatalf("separator for width 0 = %q, want one dash", got)
 	}
 }
 
@@ -769,7 +692,7 @@ func TestRenderSeparatorAsciiProfileHasNoANSI(t *testing.T) {
 	colorProfileFn = func() termenv.Profile { return termenv.Ascii }
 	defer func() { colorProfileFn = prev }()
 
-	line := renderSeparator(38, 24)
+	line := renderSeparator(24)
 	if line != ansi.Strip(line) {
 		t.Fatalf("Ascii separator should not contain ANSI codes, got %q", line)
 	}

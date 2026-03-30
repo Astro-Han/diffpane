@@ -158,35 +158,19 @@ func gutterWidth(file *internal.FileDiff, viewportWidth int) int {
 }
 
 // renderSeparator builds a fixed-width hunk separator for the current viewport.
-func renderSeparator(startLine, width int) string {
+func renderSeparator(width int) string {
 	const dash = "─"
 
-	plainSeparator := func() string {
-		count := width
-		if count < 1 {
-			count = 1
-		}
-		text := strings.Repeat(dash, count)
-		if colorProfileFn() == termenv.Ascii {
-			return text
-		}
-		return StyleDim.Render(text)
+	count := width
+	if count < 1 {
+		count = 1
 	}
 
-	if startLine <= 1 {
-		return plainSeparator()
-	}
-
-	label := fmt.Sprintf(" L%d ", startLine)
-	minWidth := 2 + runewidth.StringWidth(label) + 2
-	if width < minWidth {
-		return plainSeparator()
-	}
-
-	text := "──" + label + strings.Repeat(dash, width-runewidth.StringWidth("──"+label))
+	text := strings.Repeat(dash, count)
 	if colorProfileFn() == termenv.Ascii {
 		return text
 	}
+
 	return StyleDim.Render(text)
 }
 
@@ -207,7 +191,7 @@ func diffDisplayLines(file *internal.FileDiff, width int) []string {
 
 	var lines []string
 	for _, hunk := range file.Hunks {
-		lines = append(lines, renderSeparator(hunk.StartLine, width))
+		lines = append(lines, renderSeparator(width))
 		for _, diffLine := range hunk.Lines {
 			lineNo := displayedLineNo(diffLine)
 			for i, segment := range wrapLineParts(diffLine.Content, contentWidth) {
