@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -1166,6 +1167,51 @@ func TestModelRestoreFollowFalseTriggerScrollsTop(t *testing.T) {
 	got := falseTrigger.(Model)
 	if got.ScrollOffset != 0 {
 		t.Fatalf("ScrollOffset = %d, want 0", got.ScrollOffset)
+	}
+}
+
+// TestModelPreservesHighlightAcrossNoopRefresh verifies that a repeated diff
+// snapshot without any new changed path keeps the current highlight batch.
+func TestModelPreservesHighlightAcrossNoopRefresh(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		fileWithHunks("a.txt", addHunk(10, "base")),
+	})
+
+	firstUpdate, _ := model.Update(FilesUpdatedMsg{
+		BaselineSHA: "sha",
+		Files: []internal.FileDiff{
+			fileWithHunks("a.txt",
+				addHunk(10, "base"),
+				addHunk(20, "latest"),
+			),
+		},
+		ChangedPaths: []string{"a.txt"},
+	})
+
+	afterChange := firstUpdate.(Model)
+	beforeHighlight := afterChange.highlightedHunks
+	beforeLastChanged := afterChange.lastChangedPath
+	beforeLastHighlighted := afterChange.lastHighlightedPath
+
+	secondUpdate, _ := afterChange.Update(FilesUpdatedMsg{
+		BaselineSHA: "sha",
+		Files: []internal.FileDiff{
+			fileWithHunks("a.txt",
+				addHunk(10, "base"),
+				addHunk(20, "latest"),
+			),
+		},
+	})
+
+	got := secondUpdate.(Model)
+	if !reflect.DeepEqual(got.highlightedHunks, beforeHighlight) {
+		t.Fatalf("highlightedHunks = %#v, want %#v preserved", got.highlightedHunks, beforeHighlight)
+	}
+	if got.lastChangedPath != beforeLastChanged {
+		t.Fatalf("lastChangedPath = %q, want %q preserved", got.lastChangedPath, beforeLastChanged)
+	}
+	if got.lastHighlightedPath != beforeLastHighlighted {
+		t.Fatalf("lastHighlightedPath = %q, want %q preserved", got.lastHighlightedPath, beforeLastHighlighted)
 	}
 }
 

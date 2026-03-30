@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"reflect"
 	"strings"
 	"time"
 
@@ -139,6 +140,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleFilesUpdated(msg FilesUpdatedMsg) (tea.Model, tea.Cmd) {
 	if msg.BaselineSHA != "" && msg.BaselineSHA != m.BaselineSHA {
+		return m, nil
+	}
+
+	// Ignore empty repeated snapshots so the latest highlight batch persists
+	// until a real diff change or manual reset advances the epoch.
+	if len(msg.ChangedPaths) == 0 && reflect.DeepEqual(msg.Files, m.Files) {
 		return m, nil
 	}
 
