@@ -14,7 +14,8 @@ import (
 )
 
 var (
-	// lexerCache stores resolved lexers by extension so repeated renders stay cheap.
+	// lexerCache stores resolved lexers by full filename so special basenames
+	// keep their own lexer selection across repeated renders.
 	lexerCache   = make(map[string]chroma.Lexer)
 	lexerCacheMu sync.Mutex
 )

@@ -100,11 +100,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Files:       msg.Files,
 			})
 		}
-		m.notificationSeq++
-		token := m.notificationSeq
-		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-			return ClearNotificationMsg{Token: token}
-		})
+		return startTimedNotificationClear(m)
 	case ManualResetFailedMsg:
 		m.resetPending = false
 		m.resetInFlight = false
@@ -112,11 +108,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Error != "" {
 			m.Notification += ": " + msg.Error
 		}
-		m.notificationSeq++
-		token := m.notificationSeq
-		return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-			return ClearNotificationMsg{Token: token}
-		})
+		return startTimedNotificationClear(m)
 	case ResetTimeoutMsg:
 		if m.resetPending {
 			m.resetPending = false
@@ -136,6 +128,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// startTimedNotificationClear advances the notification token and returns the
+// timer command that clears only the currently active notification.
+func startTimedNotificationClear(m Model) (tea.Model, tea.Cmd) {
+	m.notificationSeq++
+	token := m.notificationSeq
+	return m, tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+		return ClearNotificationMsg{Token: token}
+	})
 }
 
 func (m Model) handleFilesUpdated(msg FilesUpdatedMsg) (tea.Model, tea.Cmd) {
@@ -209,10 +211,8 @@ func (m Model) applyFilesUpdate(msg FilesUpdatedMsg) Model {
 	}
 
 	if m.FollowOn {
-		if idx := fileIndexByPath(m.Files, m.lastHighlightedPath); idx >= 0 {
-			m.setFollowTarget(idx, currentPath)
-		} else if idx := fileIndexByPath(m.Files, m.lastChangedPath); idx >= 0 {
-			m.setFollowTarget(idx, currentPath)
+		if idx := m.latestFollowTargetIndex(); idx >= 0 {
+			m.setFollowTarget(idx)
 		} else {
 			m.anchorCurrentPath(currentPath)
 		}
@@ -363,24 +363,23 @@ func (m Model) closeOverlay() Model {
 }
 
 func (m *Model) selectLatestPendingFile() {
-	currentPath := ""
-	if m.CurrentIdx >= 0 && m.CurrentIdx < len(m.Files) {
-		currentPath = m.Files[m.CurrentIdx].Path
-	}
-
-	if idx := fileIndexByPath(m.Files, m.lastHighlightedPath); idx >= 0 {
-		m.setFollowTarget(idx, currentPath)
-		return
-	}
-	if idx := fileIndexByPath(m.Files, m.lastChangedPath); idx >= 0 {
-		m.setFollowTarget(idx, currentPath)
+	if idx := m.latestFollowTargetIndex(); idx >= 0 {
+		m.setFollowTarget(idx)
 		return
 	}
 	m.clampScrollOffset()
 }
 
+// latestFollowTargetIndex returns the preferred file index for follow mode.
+func (m Model) latestFollowTargetIndex() int {
+	if idx := fileIndexByPath(m.Files, m.lastHighlightedPath); idx >= 0 {
+		return idx
+	}
+	return fileIndexByPath(m.Files, m.lastChangedPath)
+}
+
 // setFollowTarget applies follow-mode scrolling rules for one selected file.
-func (m *Model) setFollowTarget(targetIdx int, currentPath string) {
+func (m *Model) setFollowTarget(targetIdx int) {
 	file := &m.Files[targetIdx]
 	m.CurrentIdx = targetIdx
 
@@ -389,7 +388,6 @@ func (m *Model) setFollowTarget(targetIdx int, currentPath string) {
 		m.followTargetPath = file.Path
 		m.followTargetHunk = hunkIdx
 	} else {
-		_ = currentPath
 		m.clearFollowTarget()
 		m.ScrollOffset = 0
 	}

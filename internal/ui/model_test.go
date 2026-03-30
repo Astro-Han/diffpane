@@ -945,6 +945,31 @@ func TestModelManualResetNotificationIgnoresStaleClear(t *testing.T) {
 	}
 }
 
+// TestStartTimedNotificationClearBumpsSequence verifies the shared notification
+// helper advances the token and returns a clear command tied to the new token.
+func TestStartTimedNotificationClearBumpsSequence(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "old-sha", nil)
+	model.notificationSeq = 6
+
+	next, cmd := startTimedNotificationClear(model)
+	gotModel := next.(Model)
+	if gotModel.notificationSeq != 7 {
+		t.Fatalf("notificationSeq = %d, want 7", gotModel.notificationSeq)
+	}
+	if cmd == nil {
+		t.Fatal("expected non-nil clear cmd")
+	}
+
+	msg := cmd()
+	clearMsg, ok := msg.(ClearNotificationMsg)
+	if !ok {
+		t.Fatalf("message type = %T, want ClearNotificationMsg", msg)
+	}
+	if clearMsg.Token != 7 {
+		t.Fatalf("clear token = %d, want 7", clearMsg.Token)
+	}
+}
+
 // TestRenderFooterIncludesResetKey verifies footer shows r reset.
 func TestRenderFooterIncludesResetKey(t *testing.T) {
 	footer := RenderFooter(true, "", 80)

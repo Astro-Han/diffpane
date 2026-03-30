@@ -190,8 +190,15 @@ func diffDisplayLines(file *internal.FileDiff, width int, highlightSet map[int]b
 		return []string{StyleDim.Render("Binary file changed")}
 	}
 
-	contentWidth := max(1, width-gutterWidth(file, width))
-	lineNumberWidth := lineNoWidth(file)
+	gutter := gutterWidth(file, width)
+	compactGutter := gutter == 1
+	contentWidth := max(1, width-gutter)
+	lineNumberWidth := 0
+	blankLineNo := ""
+	if !compactGutter {
+		lineNumberWidth = lineNoWidth(file)
+		blankLineNo = strings.Repeat(" ", lineNumberWidth)
+	}
 
 	var lines []string
 	for hunkIdx, hunk := range file.Hunks {
@@ -200,7 +207,7 @@ func diffDisplayLines(file *internal.FileDiff, width int, highlightSet map[int]b
 		for _, diffLine := range hunk.Lines {
 			lineNo := displayedLineNo(diffLine)
 			for i, segment := range wrapLineParts(diffLine.Content, contentWidth) {
-				if gutterWidth(file, width) == 1 {
+				if compactGutter {
 					prefix := "↳"
 					if i == 0 {
 						prefix = diffPrefix(diffLine.Type)
@@ -209,7 +216,7 @@ func diffDisplayLines(file *internal.FileDiff, width int, highlightSet map[int]b
 					continue
 				}
 
-				lineNoText := strings.Repeat(" ", lineNumberWidth)
+				lineNoText := blankLineNo
 				prefix := "↳"
 				if i == 0 {
 					lineNoText = formatDisplayedLineNo(lineNo, lineNumberWidth)
