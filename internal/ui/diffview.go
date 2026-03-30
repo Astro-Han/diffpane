@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"hash/fnv"
+	"sort"
 	"strings"
 	"sync"
 
@@ -15,11 +16,12 @@ import (
 const terminalTabStop = 8
 
 type displayLineCacheKey struct {
-	path      string
-	width     int
-	isBinary  bool
-	status    internal.FileStatus
-	signature uint64
+	path         string
+	width        int
+	isBinary     bool
+	status       internal.FileStatus
+	signature    uint64
+	highlightSig uint64
 }
 
 // displayLineCache reuses the most recent rendered visual lines for the same
@@ -36,13 +38,14 @@ func newDisplayLineCache() *displayLineCache {
 	return &displayLineCache{}
 }
 
-// get returns cached rendered lines when the file signature and width match.
-func (c *displayLineCache) get(file *internal.FileDiff, width int, build func() []string) []string {
+// get returns cached rendered lines when the file signature, width, and
+// highlight state match.
+func (c *displayLineCache) get(file *internal.FileDiff, width int, highlightSet map[int]bool, build func() []string) []string {
 	if c == nil {
 		return build()
 	}
 
-	key := newDisplayLineCacheKey(file, width)
+	key := newDisplayLineCacheKey(file, width, highlightSet)
 
 	c.mu.Lock()
 	if c.valid && c.key == key {
@@ -64,7 +67,7 @@ func (c *displayLineCache) get(file *internal.FileDiff, width int, build func() 
 }
 
 // newDisplayLineCacheKey fingerprints the rendered inputs that affect visual lines.
-func newDisplayLineCacheKey(file *internal.FileDiff, width int) displayLineCacheKey {
+func newDisplayLineCacheKey(file *internal.FileDiff, width int, highlightSet map[int]bool) displayLineCacheKey {
 	key := displayLineCacheKey{width: width}
 	if file == nil {
 		return key
@@ -82,12 +85,13 @@ func newDisplayLineCacheKey(file *internal.FileDiff, width int) displayLineCache
 		}
 	}
 	key.signature = hasher.Sum64()
+	key.highlightSig = highlightSignature(highlightSet)
 	return key
 }
 
 // RenderDiffView renders the current file diff within the viewport.
-func RenderDiffView(file *internal.FileDiff, scrollOffset, width, height int) string {
-	lines := diffDisplayLines(file, width)
+func RenderDiffView(file *internal.FileDiff, scrollOffset, width, height int, highlightSet map[int]bool) string {
+	lines := diffDisplayLines(file, width, highlightSet)
 	return renderDisplayLines(lines, scrollOffset, height)
 }
 
@@ -175,7 +179,7 @@ func renderSeparator(width int) string {
 }
 
 // diffDisplayLines expands one file diff into the exact visual lines shown in the viewport.
-func diffDisplayLines(file *internal.FileDiff, width int) []string {
+func diffDisplayLines(file *internal.FileDiff, width int, highlightSet map[int]bool) []string {
 	if file == nil {
 		return nil
 	}
@@ -190,7 +194,8 @@ func diffDisplayLines(file *internal.FileDiff, width int) []string {
 	lineNumberWidth := lineNoWidth(file)
 
 	var lines []string
-	for _, hunk := range file.Hunks {
+	for hunkIdx, hunk := range file.Hunks {
+		highlightedHunk := highlightSet[hunkIdx]
 		lines = append(lines, renderSeparator(width))
 		for _, diffLine := range hunk.Lines {
 			lineNo := displayedLineNo(diffLine)
@@ -200,7 +205,7 @@ func diffDisplayLines(file *internal.FileDiff, width int) []string {
 					if i == 0 {
 						prefix = diffPrefix(diffLine.Type)
 					}
-					lines = append(lines, renderDiffSegment("", prefix, segment, diffLine.Type, width, file.Path))
+					lines = append(lines, renderDiffSegment("", prefix, segment, diffLine.Type, width, file.Path, highlightedHunk))
 					continue
 				}
 
@@ -210,7 +215,7 @@ func diffDisplayLines(file *internal.FileDiff, width int) []string {
 					lineNoText = formatDisplayedLineNo(lineNo, lineNumberWidth)
 					prefix = diffPrefix(diffLine.Type)
 				}
-				lines = append(lines, renderDiffSegment(lineNoText, prefix, segment, diffLine.Type, width, file.Path))
+				lines = append(lines, renderDiffSegment(lineNoText, prefix, segment, diffLine.Type, width, file.Path, highlightedHunk))
 			}
 		}
 	}
@@ -252,21 +257,30 @@ func highlightDiffSegment(segment, filename string) string {
 	return HighlightCode(segment, filename)
 }
 
-// styleDiffPrefix applies the existing add/delete color to the diff prefix
+// styleDiffPrefix applies add/delete foreground color to prefixes when needed
 // while leaving context-line prefixes unstyled.
-func styleDiffPrefix(prefix string, lineType internal.LineType) string {
+func styleDiffPrefix(prefix string, lineType internal.LineType, forceColor bool) string {
 	profile := colorProfileFn()
 	// TrueColor with known theme: prefix inherits background, no foreground color needed.
 	// Ascii: no ANSI codes at all.
 	// TrueColor with unknown theme: use foreground colors (same as ANSI256/ANSI).
-	if profile == termenv.Ascii || (profile == termenv.TrueColor && GetTheme() != ThemeUnknown) {
+	if profile == termenv.Ascii {
+		return prefix
+	}
+	if !forceColor && profile == termenv.TrueColor && GetTheme() != ThemeUnknown {
 		return prefix
 	}
 
 	switch lineType {
 	case internal.LineAdd:
+		if forceColor && profile == termenv.TrueColor && GetTheme() != ThemeUnknown {
+			return applyFg(prefix, resolvedAdaptiveHex(ColorAdd))
+		}
 		return StyleAdd.Render(prefix)
 	case internal.LineDel:
+		if forceColor && profile == termenv.TrueColor && GetTheme() != ThemeUnknown {
+			return applyFg(prefix, resolvedAdaptiveHex(ColorDel))
+		}
 		return StyleDel.Render(prefix)
 	default:
 		return prefix
@@ -338,13 +352,39 @@ func resolvedBgHex(color lipgloss.AdaptiveColor) string {
 	}
 }
 
-// renderDiffSegment assembles one visual row and applies low-color prefix
-// styling or true-color backgrounds depending on terminal capability.
-func renderDiffSegment(lineNoText, prefix, code string, lineType internal.LineType, width int, filename string) string {
-	highlighted := highlightDiffSegment(code, filename)
+func resolvedAdaptiveHex(color lipgloss.AdaptiveColor) string {
+	switch GetTheme() {
+	case ThemeDark:
+		return color.Dark
+	case ThemeLight:
+		return color.Light
+	default:
+		return ""
+	}
+}
+
+func applyFg(text, hexColor string) string {
+	if hexColor == "" {
+		return text
+	}
+
+	return hexToFgANSI(hexColor) + text + "\033[0m"
+}
+
+func hexToFgANSI(hex string) string {
+	var r, g, b int
+	fmt.Sscanf(hex, "#%02x%02x%02x", &r, &g, &b)
+	return fmt.Sprintf("\033[38;2;%d;%d;%dm", r, g, b)
+}
+
+// renderDiffSegment assembles one visual row and applies prefix styling and
+// optional true-color backgrounds depending on terminal capability.
+func renderDiffSegment(lineNoText, prefix, code string, lineType internal.LineType, width int, filename string, highlighted bool) string {
+	codeText := highlightDiffSegment(code, filename)
+	forcePrefixColor := !highlighted && (lineType == internal.LineAdd || lineType == internal.LineDel)
 	if lineNoText == "" {
-		assembled := styleDiffPrefix(prefix, lineType) + highlighted
-		if colorProfileFn() != termenv.TrueColor {
+		assembled := styleDiffPrefix(prefix, lineType, forcePrefixColor) + codeText
+		if colorProfileFn() != termenv.TrueColor || !highlighted {
 			return assembled
 		}
 
@@ -364,8 +404,8 @@ func renderDiffSegment(lineNoText, prefix, code string, lineType internal.LineTy
 		lineNoRender = StyleDim.Render(lineNoText)
 	}
 
-	assembled := lineNoRender + " " + styleDiffPrefix(prefix, lineType) + highlighted
-	if colorProfileFn() != termenv.TrueColor {
+	assembled := lineNoRender + " " + styleDiffPrefix(prefix, lineType, forcePrefixColor) + codeText
+	if colorProfileFn() != termenv.TrueColor || !highlighted {
 		return assembled
 	}
 
@@ -378,6 +418,25 @@ func renderDiffSegment(lineNoText, prefix, code string, lineType internal.LineTy
 	default:
 		return padded
 	}
+}
+
+func highlightSignature(highlightSet map[int]bool) uint64 {
+	if len(highlightSet) == 0 {
+		return 0
+	}
+
+	indices := make([]int, 0, len(highlightSet))
+	for idx := range highlightSet {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+
+	hasher := fnv.New64a()
+	for _, idx := range indices {
+		_, _ = hasher.Write([]byte(fmt.Sprintf("%d\x00", idx)))
+	}
+
+	return hasher.Sum64()
 }
 
 // expandTabs replaces tab characters with spaces so width calculations match

@@ -530,8 +530,9 @@ func (m Model) View() string {
 	if m.OverlayOpen {
 		content = RenderOverlay(m.OverlaySnapshot, m.OverlayCursor, diffHeight, m.Width)
 	} else if len(m.Files) > 0 && m.CurrentIdx < len(m.Files) {
-		lines := m.displayCache.get(&m.Files[m.CurrentIdx], m.Width, func() []string {
-			return diffDisplayLines(&m.Files[m.CurrentIdx], m.Width)
+		highlightSet := m.highlightedHunks[m.Files[m.CurrentIdx].Path]
+		lines := m.displayCache.get(&m.Files[m.CurrentIdx], m.Width, highlightSet, func() []string {
+			return diffDisplayLines(&m.Files[m.CurrentIdx], m.Width, highlightSet)
 		})
 		content = renderDisplayLines(lines, m.ScrollOffset, diffHeight)
 	}

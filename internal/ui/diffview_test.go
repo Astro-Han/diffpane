@@ -93,13 +93,13 @@ func TestRenderDiffViewCountsWrappedDisplayLines(t *testing.T) {
 		}},
 	}
 
-	firstPage := RenderDiffView(file, 0, 8, 2)
+	firstPage := RenderDiffView(file, 0, 8, 2, nil)
 	firstLines := strings.Split(firstPage, "\n")
 	if len(firstLines) != 2 {
 		t.Fatalf("first page line count = %d, want 2", len(firstLines))
 	}
 
-	secondPage := RenderDiffView(file, 1, 8, 2)
+	secondPage := RenderDiffView(file, 1, 8, 2, nil)
 	secondLines := strings.Split(secondPage, "\n")
 	if len(secondLines) != 2 {
 		t.Fatalf("second page line count = %d, want 2", len(secondLines))
@@ -108,7 +108,7 @@ func TestRenderDiffViewCountsWrappedDisplayLines(t *testing.T) {
 		t.Fatalf("second page should include wrapped continuation, got %q", secondLines[1])
 	}
 
-	thirdPage := RenderDiffView(file, 2, 8, 2)
+	thirdPage := RenderDiffView(file, 2, 8, 2, nil)
 	thirdLines := strings.Split(thirdPage, "\n")
 	if !strings.HasPrefix(thirdLines[0], "↳") {
 		t.Fatalf("third page should start with wrapped continuation, got %q", thirdLines[0])
@@ -155,7 +155,7 @@ func TestSeparatorLineMultiHunk(t *testing.T) {
 		},
 	}
 
-	lines := diffDisplayLines(file, 40)
+	lines := diffDisplayLines(file, 40, nil)
 	separatorCount := 0
 	for _, line := range lines {
 		if strings.Contains(ansi.Strip(line), "──") {
@@ -182,7 +182,7 @@ func TestDiffDisplayLinesTabIndentedLineFitsViewport(t *testing.T) {
 		}},
 	}
 
-	lines := diffDisplayLines(file, width)
+	lines := diffDisplayLines(file, width, nil)
 	for i, line := range lines {
 		if rows := terminalRows(line, width); rows != 1 {
 			t.Fatalf("line %d occupies %d terminal rows, want 1: %q", i, rows, ansi.Strip(line))
@@ -205,7 +205,7 @@ func TestDiffDisplayLinesTabAndCJKLineFitsViewport(t *testing.T) {
 		}},
 	}
 
-	lines := diffDisplayLines(file, width)
+	lines := diffDisplayLines(file, width, nil)
 	if len(lines) < 3 {
 		t.Fatalf("line count = %d, want at least 3 to exercise wrapped tab+CJK rendering", len(lines))
 	}
@@ -231,7 +231,7 @@ func TestDiffDisplayLinesTabLineFitsNarrowViewport(t *testing.T) {
 		}},
 	}
 
-	lines := diffDisplayLines(file, width)
+	lines := diffDisplayLines(file, width, nil)
 	if len(lines) < 5 {
 		t.Fatalf("line count = %d, want at least 5 to exercise narrow multi-segment wrapping", len(lines))
 	}
@@ -261,7 +261,7 @@ func TestDiffDisplayLinesGoFileHighlighted(t *testing.T) {
 		}},
 	}
 
-	lines := diffDisplayLines(file, 80)
+	lines := diffDisplayLines(file, 80, nil)
 	if len(lines) < 2 {
 		t.Fatalf("expected at least 2 lines (separator + code), got %d", len(lines))
 	}
@@ -290,7 +290,7 @@ func TestDiffDisplayLinesPlaintextNoHighlight(t *testing.T) {
 		}},
 	}
 
-	lines := diffDisplayLines(file, 80)
+	lines := diffDisplayLines(file, 80, nil)
 	if len(lines) < 2 {
 		t.Fatalf("expected at least 2 lines, got %d", len(lines))
 	}
@@ -321,7 +321,7 @@ func TestDiffDisplayLinesWrappedContinuationHighlighted(t *testing.T) {
 		}},
 	}
 
-	lines := diffDisplayLines(file, 30)
+	lines := diffDisplayLines(file, 30, nil)
 	if len(lines) < 3 {
 		t.Fatalf("expected at least 3 lines (separator + first + continuation), got %d", len(lines))
 	}
@@ -367,7 +367,7 @@ func TestCountWrappedDiffLinesMatchesRenderedLines(t *testing.T) {
 	}
 
 	width := 24
-	rendered := diffDisplayLines(file, width)
+	rendered := diffDisplayLines(file, width, nil)
 	counted := countWrappedDiffLines(file, width)
 	if counted != len(rendered) {
 		t.Fatalf("counted lines = %d, want %d", counted, len(rendered))
@@ -391,11 +391,11 @@ func TestDisplayLineCacheReusesBuilderOutput(t *testing.T) {
 	}
 
 	builds := 0
-	first := cache.get(file, 80, func() []string {
+	first := cache.get(file, 80, nil, func() []string {
 		builds++
 		return []string{"first"}
 	})
-	second := cache.get(file, 80, func() []string {
+	second := cache.get(file, 80, nil, func() []string {
 		builds++
 		return []string{"second"}
 	})
@@ -405,6 +405,37 @@ func TestDisplayLineCacheReusesBuilderOutput(t *testing.T) {
 	}
 	if !reflect.DeepEqual(second, first) {
 		t.Fatalf("cached lines = %#v, want %#v", second, first)
+	}
+}
+
+// TestDisplayLineCacheMissesWhenHighlightStateChanges verifies highlight-only
+// visual changes invalidate the one-entry render cache.
+func TestDisplayLineCacheMissesWhenHighlightStateChanges(t *testing.T) {
+	cache := newDisplayLineCache()
+	file := &internal.FileDiff{
+		Path: "main.go",
+		Hunks: []internal.DiffHunk{{
+			Header:    "@@ -0,0 +1,1 @@",
+			StartLine: 1,
+			Lines: []internal.DiffLine{{
+				Type:    internal.LineAdd,
+				Content: "func main() {}",
+			}},
+		}},
+	}
+
+	builds := 0
+	cache.get(file, 80, map[int]bool{0: true}, func() []string {
+		builds++
+		return []string{"first"}
+	})
+	cache.get(file, 80, nil, func() []string {
+		builds++
+		return []string{"second"}
+	})
+
+	if builds != 2 {
+		t.Fatalf("builds = %d, want 2 when highlight state changes", builds)
 	}
 }
 
@@ -438,7 +469,7 @@ func TestDisplayLineCacheKeyChangesWhenLineNumbersShift(t *testing.T) {
 		}},
 	}
 
-	if newDisplayLineCacheKey(base, 80) == newDisplayLineCacheKey(shifted, 80) {
+	if newDisplayLineCacheKey(base, 80, nil) == newDisplayLineCacheKey(shifted, 80, nil) {
 		t.Fatal("cache key should change when displayed line numbers shift")
 	}
 }
@@ -504,7 +535,7 @@ func TestDiffDisplayLinesFullGutterShowsLineNumbersAndContinuationMarker(t *test
 		}},
 	}
 
-	lines := diffDisplayLines(file, 40)
+	lines := diffDisplayLines(file, 40, nil)
 	first := ansi.Strip(lines[1])
 	second := ansi.Strip(lines[2])
 
@@ -532,7 +563,7 @@ func TestDiffDisplayLinesDeletedLineUsesOldLineNumber(t *testing.T) {
 		}},
 	}
 
-	lines := diffDisplayLines(file, 60)
+	lines := diffDisplayLines(file, 60, nil)
 	if stripped := ansi.Strip(lines[1]); !strings.HasPrefix(stripped, "  42 -") {
 		t.Fatalf("deleted line gutter = %q, want old-side line number", stripped)
 	}
@@ -552,7 +583,7 @@ func TestDiffDisplayLinesMalformedHunkLeavesBlankLineNumber(t *testing.T) {
 		}},
 	}
 
-	lines := diffDisplayLines(file, 60)
+	lines := diffDisplayLines(file, 60, nil)
 	stripped := ansi.Strip(lines[1])
 	if !strings.HasPrefix(stripped, "     +") {
 		t.Fatalf("malformed hunk gutter = %q, want blank line number field", stripped)
@@ -577,7 +608,7 @@ func TestDiffDisplayLinesCompactGutterOmitsLineNumbers(t *testing.T) {
 		}},
 	}
 
-	lines := diffDisplayLines(file, 39)
+	lines := diffDisplayLines(file, 39, nil)
 	if stripped := ansi.Strip(lines[1]); stripped != "+abc" {
 		t.Fatalf("compact gutter line = %q, want prefix only", stripped)
 	}
@@ -598,7 +629,7 @@ func TestDiffDisplayLinesCompactContinuationUsesArrow(t *testing.T) {
 		}},
 	}
 
-	lines := diffDisplayLines(file, 39)
+	lines := diffDisplayLines(file, 39, nil)
 	if stripped := ansi.Strip(lines[2]); !strings.HasPrefix(stripped, "↳") {
 		t.Fatalf("compact continuation = %q, want ↳ prefix", stripped)
 	}
@@ -619,7 +650,7 @@ func TestCountWrappedDiffLinesMatchesRenderedLinesAfterGutterRefactor(t *testing
 	}
 
 	width := 32
-	if got, want := countWrappedDiffLines(file, width), len(diffDisplayLines(file, width)); got != want {
+	if got, want := countWrappedDiffLines(file, width), len(diffDisplayLines(file, width, nil)); got != want {
 		t.Fatalf("countWrappedDiffLines() = %d, want %d", got, want)
 	}
 }
@@ -644,12 +675,32 @@ func TestDiffDisplayLinesTrueColorPadsBackgroundAcrossViewport(t *testing.T) {
 		}},
 	}
 
-	line := diffDisplayLines(file, 30)[1]
+	line := diffDisplayLines(file, 30, map[int]bool{0: true})[1]
 	if !strings.Contains(line, "\033[48;2;") {
 		t.Fatalf("true-color add line should contain background ANSI, got %q", line)
 	}
 	if lipgloss.Width(line) != 30 {
 		t.Fatalf("rendered width = %d, want 30", lipgloss.Width(line))
+	}
+}
+
+// TestRenderDiffSegmentTrueColorNonHighlightedForcesPrefixColor verifies
+// true-color terminals still color add/delete prefixes when backgrounds are off.
+func TestRenderDiffSegmentTrueColorNonHighlightedForcesPrefixColor(t *testing.T) {
+	prevProfile := colorProfileFn
+	colorProfileFn = func() termenv.Profile { return termenv.TrueColor }
+	defer func() { colorProfileFn = prevProfile }()
+	defer setThemeForTest(ThemeDark)()
+
+	line := renderDiffSegment("", "+", "plain content", internal.LineAdd, 30, "notes.txt", false)
+	if strings.Contains(line, "\033[48;2;") {
+		t.Fatalf("non-highlighted line should not contain background ANSI, got %q", line)
+	}
+	if !strings.Contains(line, "\033[") {
+		t.Fatalf("non-highlighted line should contain prefix ANSI, got %q", line)
+	}
+	if got := ansi.Strip(line); got != "+plain content" {
+		t.Fatalf("rendered line = %q, want +plain content", got)
 	}
 }
 
@@ -672,7 +723,7 @@ func TestDiffDisplayLinesAnsi256KeepsColoredPrefixWithoutBackground(t *testing.T
 		}},
 	}
 
-	line := diffDisplayLines(file, 30)[1]
+	line := diffDisplayLines(file, 30, nil)[1]
 	if strings.Contains(line, "\033[48;2;") {
 		t.Fatalf("ANSI256 profile should not contain true-color background, got %q", line)
 	}
@@ -700,7 +751,7 @@ func TestDiffDisplayLinesAnsiKeepsColoredPrefixWithoutBackground(t *testing.T) {
 		}},
 	}
 
-	line := diffDisplayLines(file, 30)[1]
+	line := diffDisplayLines(file, 30, nil)[1]
 	if strings.Contains(line, "\033[48;2;") {
 		t.Fatalf("ANSI profile should not contain true-color background, got %q", line)
 	}
