@@ -685,6 +685,34 @@ func TestDiffDisplayLinesAnsi256KeepsColoredPrefixWithoutBackground(t *testing.T
 	}
 }
 
+// TestDiffDisplayLinesAnsiKeepsColoredPrefixWithoutBackground verifies
+// 16-color terminals stay on the foreground-only add/delete signal as well.
+func TestDiffDisplayLinesAnsiKeepsColoredPrefixWithoutBackground(t *testing.T) {
+	prev := colorProfileFn
+	colorProfileFn = func() termenv.Profile { return termenv.ANSI }
+	defer func() { colorProfileFn = prev }()
+
+	file := &internal.FileDiff{
+		Path: "main.go",
+		Hunks: []internal.DiffHunk{{
+			Header: "@@ -0,0 +1,1 @@",
+			Lines: []internal.DiffLine{{
+				Type:      internal.LineAdd,
+				Content:   "func main() {",
+				NewLineNo: 1,
+			}},
+		}},
+	}
+
+	line := diffDisplayLines(file, 30)[1]
+	if strings.Contains(line, "\033[48;2;") {
+		t.Fatalf("ANSI profile should not contain true-color background, got %q", line)
+	}
+	if !strings.Contains(line, "\033[") {
+		t.Fatalf("ANSI profile should still style the prefix, got %q", line)
+	}
+}
+
 // TestRenderSeparatorAsciiProfileHasNoANSI verifies Ascii mode removes ANSI
 // styling from separators as well.
 func TestRenderSeparatorAsciiProfileHasNoANSI(t *testing.T) {
