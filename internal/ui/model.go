@@ -209,7 +209,9 @@ func (m Model) applyFilesUpdate(msg FilesUpdatedMsg) Model {
 	}
 
 	if m.FollowOn {
-		if idx := fileIndexByPath(m.Files, m.lastChangedPath); idx >= 0 {
+		if idx := fileIndexByPath(m.Files, m.lastHighlightedPath); idx >= 0 {
+			m.setFollowTarget(idx, currentPath)
+		} else if idx := fileIndexByPath(m.Files, m.lastChangedPath); idx >= 0 {
 			m.setFollowTarget(idx, currentPath)
 		} else {
 			m.anchorCurrentPath(currentPath)

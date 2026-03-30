@@ -82,6 +82,38 @@ func TestModelFollowUsesMostRecentChangedPath(t *testing.T) {
 	}
 }
 
+// TestModelFollowPrefersLatestHighlightedPath verifies active follow mode uses
+// the last file with a newly highlighted hunk over a later changed path that
+// produced no new diff hunk.
+func TestModelFollowPrefersLatestHighlightedPath(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		fileWithHunks("a.txt", addHunk(10, "stable")),
+		fileWithHunks("b.txt", addHunk(10, "old")),
+	})
+	model.Width = 80
+	model.Height = 5
+
+	updated, _ := model.Update(FilesUpdatedMsg{
+		BaselineSHA: "sha",
+		Files: []internal.FileDiff{
+			fileWithHunks("a.txt", addHunk(10, "stable")),
+			fileWithHunks("b.txt",
+				addHunk(10, "old"),
+				addHunk(20, "latest"),
+			),
+		},
+		ChangedPaths: []string{"b.txt", "a.txt"},
+	})
+
+	got := updated.(Model)
+	if got.CurrentIdx != 1 {
+		t.Fatalf("CurrentIdx = %d, want 1 for highlighted path b.txt", got.CurrentIdx)
+	}
+	if got.ScrollOffset == 0 {
+		t.Fatalf("ScrollOffset = %d, want non-zero for latest highlighted hunk", got.ScrollOffset)
+	}
+}
+
 // TestModelPausedFollowTracksLastChangedPath verifies paused follow keeps the
 // current file selected and records the latest changed path without +N state.
 func TestModelPausedFollowTracksLastChangedPath(t *testing.T) {
