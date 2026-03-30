@@ -70,8 +70,8 @@ func TestModelFollowUsesMostRecentChangedPath(t *testing.T) {
 	updated, _ := model.Update(FilesUpdatedMsg{
 		Files: []internal.FileDiff{
 			file("a.txt", 1),
-			file("b.txt", 1),
-			file("c.txt", 1),
+			file("b.txt", 2),
+			file("c.txt", 2),
 		},
 		ChangedPaths: []string{"c.txt", "b.txt"},
 	})
@@ -252,8 +252,8 @@ func TestModelRestoreFollowUsesMostRecentChangedPath(t *testing.T) {
 		BaselineSHA: "sha",
 		Files: []internal.FileDiff{
 			file("a.txt", 1),
-			file("b.txt", 1),
-			file("c.txt", 1),
+			file("b.txt", 2),
+			file("c.txt", 2),
 		},
 		ChangedPaths: []string{"c.txt", "b.txt"},
 	})
@@ -752,7 +752,7 @@ func TestModelManualResetReplacesQueuedOverlayUpdate(t *testing.T) {
 		BaselineSHA: "old-sha",
 		Files: []internal.FileDiff{
 			file("current.txt", 1),
-			file("stale.txt", 1),
+			file("stale.txt", 2),
 		},
 		ChangedPaths: []string{"stale.txt"},
 	})
@@ -1049,9 +1049,9 @@ func TestModelRestoreFollowClampsChangedHunkOffset(t *testing.T) {
 	}
 }
 
-// TestModelFollowNoChangeForChangedPathScrollsTop verifies explicit changed-path
-// batches without visible highlighted hunks fall back to the file top.
-func TestModelFollowNoChangeForChangedPathScrollsTop(t *testing.T) {
+// TestModelFollowIgnoresUnchangedSnapshot verifies identical snapshots do not
+// reset scroll just because changedPaths names the current file.
+func TestModelFollowIgnoresUnchangedSnapshot(t *testing.T) {
 	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
 		fileWithHunks("a.txt",
 			addHunk(10, "first change"),
@@ -1074,14 +1074,14 @@ func TestModelFollowNoChangeForChangedPathScrollsTop(t *testing.T) {
 	})
 
 	got := updated.(Model)
-	if got.ScrollOffset != 0 {
-		t.Fatalf("ScrollOffset = %d, want 0", got.ScrollOffset)
+	if got.ScrollOffset != 2 {
+		t.Fatalf("ScrollOffset = %d, want 2 for unchanged snapshot", got.ScrollOffset)
 	}
 }
 
-// TestModelFollowFileSwitchWithoutHunkChangeScrollsTop verifies switching to a
-// different file without a new hunk falls back to the file top.
-func TestModelFollowFileSwitchWithoutHunkChangeScrollsTop(t *testing.T) {
+// TestModelFollowFileSwitchWithoutVisibleChangeIsNoop verifies changedPaths on
+// an unchanged snapshot do not switch files.
+func TestModelFollowFileSwitchWithoutVisibleChangeIsNoop(t *testing.T) {
 	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
 		fileWithHunks("a.txt",
 			addHunk(10, "first change"),
@@ -1107,18 +1107,17 @@ func TestModelFollowFileSwitchWithoutHunkChangeScrollsTop(t *testing.T) {
 	})
 
 	got := updated.(Model)
-	if got.CurrentIdx != 1 {
-		t.Fatalf("CurrentIdx = %d, want 1", got.CurrentIdx)
+	if got.CurrentIdx != 0 {
+		t.Fatalf("CurrentIdx = %d, want 0 for unchanged snapshot", got.CurrentIdx)
 	}
-	if got.ScrollOffset != 0 {
-		t.Fatalf("ScrollOffset = %d, want 0", got.ScrollOffset)
+	if got.ScrollOffset != 2 {
+		t.Fatalf("ScrollOffset = %d, want 2 for unchanged snapshot", got.ScrollOffset)
 	}
 }
 
-// TestModelRestoreFollowFalseTriggerScrollsTop verifies that after follow is
-// restored, a later changed-path batch without visible highlighted hunks falls
-// back to the target file top.
-func TestModelRestoreFollowFalseTriggerScrollsTop(t *testing.T) {
+// TestModelRestoreFollowIgnoresFalseTriggerBatch verifies that after follow is
+// restored, an identical snapshot does not clear the restored target.
+func TestModelRestoreFollowIgnoresFalseTriggerBatch(t *testing.T) {
 	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
 		fileWithHunks("a.txt", addHunk(10, "a")),
 		fileWithHunks("b.txt", addHunk(10, "b")),
@@ -1165,13 +1164,13 @@ func TestModelRestoreFollowFalseTriggerScrollsTop(t *testing.T) {
 	})
 
 	got := falseTrigger.(Model)
-	if got.ScrollOffset != 0 {
-		t.Fatalf("ScrollOffset = %d, want 0", got.ScrollOffset)
+	if got.ScrollOffset != 1 {
+		t.Fatalf("ScrollOffset = %d, want 1 after unchanged snapshot", got.ScrollOffset)
 	}
 }
 
 // TestModelPreservesHighlightAcrossNoopRefresh verifies that a repeated diff
-// snapshot without any new changed path keeps the current highlight batch.
+// snapshot keeps the current highlight batch even if changedPaths is repeated.
 func TestModelPreservesHighlightAcrossNoopRefresh(t *testing.T) {
 	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
 		fileWithHunks("a.txt", addHunk(10, "base")),
@@ -1201,6 +1200,7 @@ func TestModelPreservesHighlightAcrossNoopRefresh(t *testing.T) {
 				addHunk(20, "latest"),
 			),
 		},
+		ChangedPaths: []string{"a.txt"},
 	})
 
 	got := secondUpdate.(Model)
