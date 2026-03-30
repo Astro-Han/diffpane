@@ -1209,8 +1209,8 @@ func TestModelResizeRecalculatesFollowTargetOffset(t *testing.T) {
 
 	resized, _ := got.Update(tea.WindowSizeMsg{Width: 6, Height: 3})
 	afterResize := resized.(Model)
-	if afterResize.ScrollOffset != 4 {
-		t.Fatalf("ScrollOffset after resize = %d, want 4", afterResize.ScrollOffset)
+	if afterResize.ScrollOffset != 3 {
+		t.Fatalf("ScrollOffset after resize = %d, want 3", afterResize.ScrollOffset)
 	}
 }
 

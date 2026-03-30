@@ -47,28 +47,29 @@ func terminalRows(line string, width int) int {
 
 // TestWrapLineShort verifies lines shorter than the viewport stay untouched.
 func TestWrapLineShort(t *testing.T) {
-	result := wrapLine("+hello", 40)
-	if result != "+hello" {
-		t.Fatalf("wrapLine returned %q, want +hello", result)
+	result := wrapLine("hello", 40)
+	if result != "hello" {
+		t.Fatalf("wrapLine returned %q, want hello", result)
 	}
 }
 
-// TestWrapLineLong verifies continuation lines use indentation instead of a diff prefix.
+// TestWrapLineLong verifies the pure-content wrapper does not add continuation
+// prefixes on its own.
 func TestWrapLineLong(t *testing.T) {
-	line := "+" + strings.Repeat("a", 50)
+	line := strings.Repeat("a", 50)
 	result := wrapLine(line, 30)
 	lines := strings.Split(result, "\n")
 	if len(lines) < 2 {
 		t.Fatal("expected wrapped output")
 	}
-	if !strings.HasPrefix(lines[1], "  ") {
-		t.Fatalf("continuation = %q, want 2-space indent", lines[1])
+	if strings.HasPrefix(lines[1], "  ") {
+		t.Fatalf("continuation = %q, should not include an embedded indent", lines[1])
 	}
 }
 
 // TestWrapLineCJK verifies wrapping never cuts through a rune.
 func TestWrapLineCJK(t *testing.T) {
-	line := "+你好世界测试"
+	line := "你好世界测试"
 	result := wrapLine(line, 8)
 	for _, r := range result {
 		if r == '\uFFFD' {
@@ -102,13 +103,13 @@ func TestRenderDiffViewCountsWrappedDisplayLines(t *testing.T) {
 	if len(secondLines) != 2 {
 		t.Fatalf("second page line count = %d, want 2", len(secondLines))
 	}
-	if !strings.HasPrefix(secondLines[1], "  ") {
+	if !strings.HasPrefix(secondLines[1], "↳") {
 		t.Fatalf("second page should include wrapped continuation, got %q", secondLines[1])
 	}
 
 	thirdPage := RenderDiffView(file, 2, 8, 2)
 	thirdLines := strings.Split(thirdPage, "\n")
-	if !strings.HasPrefix(thirdLines[0], "  ") {
+	if !strings.HasPrefix(thirdLines[0], "↳") {
 		t.Fatalf("third page should start with wrapped continuation, got %q", thirdLines[0])
 	}
 }
@@ -404,8 +405,8 @@ func TestDiffDisplayLinesWrappedContinuationHighlighted(t *testing.T) {
 
 	continuation := lines[2]
 	continuationStripped := ansi.Strip(continuation)
-	if !strings.HasPrefix(continuationStripped, "  ") {
-		t.Fatalf("continuation stripped = %q, want '  ' indent", continuationStripped)
+	if !strings.HasPrefix(continuationStripped, "↳") {
+		t.Fatalf("continuation stripped = %q, want '↳' prefix", continuationStripped)
 	}
 	if len(continuation) <= len(continuationStripped) {
 		t.Fatalf("continuation segment should contain ANSI codes")
@@ -507,5 +508,186 @@ func TestDisplayLineCacheKeyChangesWhenLineNumbersShift(t *testing.T) {
 
 	if newDisplayLineCacheKey(base, 80) == newDisplayLineCacheKey(shifted, 80) {
 		t.Fatal("cache key should change when displayed line numbers shift")
+	}
+}
+
+// TestGutterWidthThresholds verifies the renderer switches between full and
+// compact gutter modes at the spec's width boundary.
+func TestGutterWidthThresholds(t *testing.T) {
+	file := &internal.FileDiff{
+		Hunks: []internal.DiffHunk{{
+			StartLine: 42,
+			Lines: []internal.DiffLine{{
+				Type:      internal.LineAdd,
+				NewLineNo: 42,
+			}},
+		}},
+	}
+
+	if got := gutterWidth(file, 60); got != 6 {
+		t.Fatalf("gutterWidth(60) = %d, want 6", got)
+	}
+	if got := gutterWidth(file, 40); got != 6 {
+		t.Fatalf("gutterWidth(40) = %d, want 6", got)
+	}
+	if got := gutterWidth(file, 39); got != 1 {
+		t.Fatalf("gutterWidth(39) = %d, want 1", got)
+	}
+}
+
+// TestLineNoWidthUsesOldAndNewMaximums verifies gutter sizing looks at both
+// old-side and new-side line number ranges.
+func TestLineNoWidthUsesOldAndNewMaximums(t *testing.T) {
+	file := &internal.FileDiff{
+		Hunks: []internal.DiffHunk{{
+			OldStartLine: 9997,
+			StartLine:    40,
+			Lines: []internal.DiffLine{
+				{Type: internal.LineDel},
+				{Type: internal.LineDel},
+				{Type: internal.LineContext},
+			},
+		}},
+	}
+
+	if got := lineNoWidth(file); got != 4 {
+		t.Fatalf("lineNoWidth() = %d, want 4", got)
+	}
+}
+
+// TestDiffDisplayLinesFullGutterShowsLineNumbersAndContinuationMarker verifies
+// wrapped lines show the numbered gutter once and use ↳ on continuation rows.
+func TestDiffDisplayLinesFullGutterShowsLineNumbersAndContinuationMarker(t *testing.T) {
+	file := &internal.FileDiff{
+		Path: "main.go",
+		Hunks: []internal.DiffHunk{{
+			Header:       "@@ -10,1 +20,1 @@",
+			OldStartLine: 10,
+			StartLine:    20,
+			Lines: []internal.DiffLine{{
+				Type:      internal.LineAdd,
+				Content:   strings.Repeat("a", 70),
+				NewLineNo: 20,
+			}},
+		}},
+	}
+
+	lines := diffDisplayLines(file, 40)
+	first := ansi.Strip(lines[1])
+	second := ansi.Strip(lines[2])
+
+	if !strings.HasPrefix(first, "  20 +") {
+		t.Fatalf("first line = %q, want line number then prefix", first)
+	}
+	if !strings.HasPrefix(second, "     ↳") {
+		t.Fatalf("continuation line = %q, want blank line number field plus ↳", second)
+	}
+}
+
+// TestDiffDisplayLinesDeletedLineUsesOldLineNumber verifies deleted rows render
+// the old-side line number instead of the new-side one.
+func TestDiffDisplayLinesDeletedLineUsesOldLineNumber(t *testing.T) {
+	file := &internal.FileDiff{
+		Path: "main.go",
+		Hunks: []internal.DiffHunk{{
+			Header:       "@@ -42,1 +0,0 @@",
+			OldStartLine: 42,
+			Lines: []internal.DiffLine{{
+				Type:      internal.LineDel,
+				Content:   "old line",
+				OldLineNo: 42,
+			}},
+		}},
+	}
+
+	lines := diffDisplayLines(file, 60)
+	if stripped := ansi.Strip(lines[1]); !strings.HasPrefix(stripped, "  42 -") {
+		t.Fatalf("deleted line gutter = %q, want old-side line number", stripped)
+	}
+}
+
+// TestDiffDisplayLinesMalformedHunkLeavesBlankLineNumber verifies malformed
+// hunks render spaces instead of a literal zero.
+func TestDiffDisplayLinesMalformedHunkLeavesBlankLineNumber(t *testing.T) {
+	file := &internal.FileDiff{
+		Path: "broken.txt",
+		Hunks: []internal.DiffHunk{{
+			Header: "@@ broken header @@",
+			Lines: []internal.DiffLine{{
+				Type:    internal.LineAdd,
+				Content: "added line",
+			}},
+		}},
+	}
+
+	lines := diffDisplayLines(file, 60)
+	stripped := ansi.Strip(lines[1])
+	if !strings.HasPrefix(stripped, "     +") {
+		t.Fatalf("malformed hunk gutter = %q, want blank line number field", stripped)
+	}
+	if strings.Contains(stripped[:6], "0") {
+		t.Fatalf("malformed hunk gutter should not render zero digits, got %q", stripped)
+	}
+}
+
+// TestDiffDisplayLinesCompactGutterOmitsLineNumbers verifies narrow terminals
+// fall back to prefix-only gutter mode.
+func TestDiffDisplayLinesCompactGutterOmitsLineNumbers(t *testing.T) {
+	file := &internal.FileDiff{
+		Path: "main.go",
+		Hunks: []internal.DiffHunk{{
+			Header: "@@ -1,1 +7,1 @@",
+			Lines: []internal.DiffLine{{
+				Type:      internal.LineAdd,
+				Content:   "abc",
+				NewLineNo: 7,
+			}},
+		}},
+	}
+
+	lines := diffDisplayLines(file, 39)
+	if stripped := ansi.Strip(lines[1]); stripped != "+abc" {
+		t.Fatalf("compact gutter line = %q, want prefix only", stripped)
+	}
+}
+
+// TestDiffDisplayLinesCompactContinuationUsesArrow verifies compact mode still
+// marks wrapped continuation rows explicitly.
+func TestDiffDisplayLinesCompactContinuationUsesArrow(t *testing.T) {
+	file := &internal.FileDiff{
+		Path: "main.go",
+		Hunks: []internal.DiffHunk{{
+			Header: "@@ -1,1 +1,1 @@",
+			Lines: []internal.DiffLine{{
+				Type:      internal.LineAdd,
+				Content:   strings.Repeat("a", 50),
+				NewLineNo: 1,
+			}},
+		}},
+	}
+
+	lines := diffDisplayLines(file, 39)
+	if stripped := ansi.Strip(lines[2]); !strings.HasPrefix(stripped, "↳") {
+		t.Fatalf("compact continuation = %q, want ↳ prefix", stripped)
+	}
+}
+
+// TestCountWrappedDiffLinesMatchesRenderedLinesAfterGutterRefactor verifies the
+// lightweight row counter stays aligned with rendered output after the layout change.
+func TestCountWrappedDiffLinesMatchesRenderedLinesAfterGutterRefactor(t *testing.T) {
+	file := &internal.FileDiff{
+		Path: "main.go",
+		Hunks: []internal.DiffHunk{{
+			Header: "@@ -1,1 +1,2 @@",
+			Lines: []internal.DiffLine{
+				{Type: internal.LineAdd, Content: strings.Repeat("a", 35), NewLineNo: 1},
+				{Type: internal.LineDel, Content: strings.Repeat("b", 35), OldLineNo: 1},
+			},
+		}},
+	}
+
+	width := 32
+	if got, want := countWrappedDiffLines(file, width), len(diffDisplayLines(file, width)); got != want {
+		t.Fatalf("countWrappedDiffLines() = %d, want %d", got, want)
 	}
 }

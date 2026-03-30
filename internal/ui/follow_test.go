@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Astro-Han/diffpane/internal"
@@ -154,5 +155,22 @@ func TestHunkVisualOffsetCountsWrappedLines(t *testing.T) {
 	got := hunkVisualOffset(file, 1, 6)
 	if got != 3 {
 		t.Fatalf("hunkVisualOffset() = %d, want 3", got)
+	}
+}
+
+// TestHunkVisualOffsetUsesContentWidth verifies follow-mode row math matches
+// the new gutter-aware wrapping width.
+func TestHunkVisualOffsetUsesContentWidth(t *testing.T) {
+	file := &internal.FileDiff{
+		Path: "a.txt",
+		Hunks: []internal.DiffHunk{
+			testHunk("@@ -1,1 +1,1 @@", 10, addLine(strings.Repeat("a", 55))),
+			testHunk("@@ -2,1 +2,1 @@", 20, addLine("z")),
+		},
+	}
+
+	got := hunkVisualOffset(file, 1, 40)
+	if got != 3 {
+		t.Fatalf("hunkVisualOffset() = %d, want 3 rows before second hunk", got)
 	}
 }

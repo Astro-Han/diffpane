@@ -114,6 +114,47 @@ func countVisualDiffLines(file *internal.FileDiff, width int) int {
 	return countWrappedDiffLines(file, width)
 }
 
+// lineNoWidth returns the width of the line number column for one file.
+func lineNoWidth(file *internal.FileDiff) int {
+	maxLineNo := 0
+	if file == nil {
+		return 4
+	}
+
+	for _, hunk := range file.Hunks {
+		oldCount := 0
+		newCount := 0
+		for _, line := range hunk.Lines {
+			switch line.Type {
+			case internal.LineDel, internal.LineContext:
+				oldCount++
+			}
+			switch line.Type {
+			case internal.LineAdd, internal.LineContext:
+				newCount++
+			}
+		}
+
+		if hunk.OldStartLine > 0 && oldCount > 0 {
+			maxLineNo = max(maxLineNo, hunk.OldStartLine+oldCount-1)
+		}
+		if hunk.StartLine > 0 && newCount > 0 {
+			maxLineNo = max(maxLineNo, hunk.StartLine+newCount-1)
+		}
+	}
+
+	return max(4, len(fmt.Sprintf("%d", maxLineNo)))
+}
+
+// gutterWidth returns the fixed gutter width for the current viewport.
+func gutterWidth(file *internal.FileDiff, viewportWidth int) int {
+	if viewportWidth < 40 {
+		return 1
+	}
+
+	return lineNoWidth(file) + 2
+}
+
 // renderSeparator builds a fixed-width hunk separator for the current viewport.
 func renderSeparator(startLine, width int) string {
 	const dash = "─"
@@ -148,20 +189,31 @@ func diffDisplayLines(file *internal.FileDiff, width int) []string {
 		return []string{StyleDim.Render("Binary file changed")}
 	}
 
+	contentWidth := max(1, width-gutterWidth(file, width))
+	lineNumberWidth := lineNoWidth(file)
+
 	var lines []string
 	for _, hunk := range file.Hunks {
 		lines = append(lines, renderSeparator(hunk.StartLine, width))
 		for _, diffLine := range hunk.Lines {
-			prefix := " "
-			switch diffLine.Type {
-			case internal.LineAdd:
-				prefix = "+"
-			case internal.LineDel:
-				prefix = "-"
-			}
+			lineNo := displayedLineNo(diffLine)
+			for i, segment := range wrapLineParts(diffLine.Content, contentWidth) {
+				if gutterWidth(file, width) == 1 {
+					prefix := "↳"
+					if i == 0 {
+						prefix = diffPrefix(diffLine.Type)
+					}
+					lines = append(lines, styleDiffPrefix(prefix, diffLine.Type)+highlightDiffSegment(segment, file.Path))
+					continue
+				}
 
-			for i, segment := range wrapLineParts(prefix+diffLine.Content, width) {
-				lines = append(lines, highlightDiffSegment(segment, i, diffLine.Type, file.Path))
+				lineNoText := strings.Repeat(" ", lineNumberWidth)
+				prefix := "↳"
+				if i == 0 {
+					lineNoText = formatDisplayedLineNo(lineNo, lineNumberWidth)
+					prefix = diffPrefix(diffLine.Type)
+				}
+				lines = append(lines, StyleDim.Render(lineNoText)+" "+styleDiffPrefix(prefix, diffLine.Type)+highlightDiffSegment(segment, file.Path))
 			}
 		}
 	}
@@ -179,20 +231,14 @@ func countWrappedDiffLines(file *internal.FileDiff, width int) int {
 		return 1
 	}
 
+	contentWidth := max(1, width-gutterWidth(file, width))
+
 	total := 0
 	for _, hunk := range file.Hunks {
 		total++
 
 		for _, diffLine := range hunk.Lines {
-			prefix := " "
-			switch diffLine.Type {
-			case internal.LineAdd:
-				prefix = "+"
-			case internal.LineDel:
-				prefix = "-"
-			}
-
-			total += len(wrapLineParts(prefix+diffLine.Content, width))
+			total += len(wrapLineParts(diffLine.Content, contentWidth))
 		}
 	}
 
@@ -204,22 +250,9 @@ func wrapLine(line string, width int) string {
 	return strings.Join(wrapLineParts(line, width), "\n")
 }
 
-// highlightDiffSegment applies diff-prefix styling and chroma code colors to
-// one already-wrapped visual diff segment.
-func highlightDiffSegment(segment string, segmentIndex int, lineType internal.LineType, filename string) string {
-	prefixLength := 1
-	if segmentIndex > 0 {
-		prefixLength = 2
-	}
-
-	if len(segment) <= prefixLength {
-		return styleDiffPrefix(segment, lineType)
-	}
-
-	prefix := segment[:prefixLength]
-	code := segment[prefixLength:]
-
-	return styleDiffPrefix(prefix, lineType) + HighlightCode(code, filename)
+// highlightDiffSegment applies syntax highlighting to one wrapped code segment.
+func highlightDiffSegment(segment, filename string) string {
+	return HighlightCode(segment, filename)
 }
 
 // styleDiffPrefix applies the existing add/delete color to the diff prefix
@@ -235,31 +268,54 @@ func styleDiffPrefix(prefix string, lineType internal.LineType) string {
 	}
 }
 
-// wrapLineParts wraps one rendered line into visual lines by terminal cell width.
-func wrapLineParts(line string, width int) []string {
-	line = expandTabs(line)
+// wrapLineParts wraps one code line into visual lines by content width.
+func wrapLineParts(code string, contentWidth int) []string {
+	code = expandTabs(code)
 
-	if width <= 0 || runewidth.StringWidth(line) <= width {
-		return []string{line}
+	if contentWidth <= 0 || runewidth.StringWidth(code) <= contentWidth {
+		return []string{code}
 	}
 
 	var result []string
-	first := truncateToWidth(line, width)
-	result = append(result, first)
-	remaining := line[len(first):]
+	remaining := code
 
 	for len(remaining) > 0 {
-		prefix := "  "
-		chunkWidth := width - runewidth.StringWidth(prefix)
-		if chunkWidth <= 0 {
-			chunkWidth = 1
-		}
-		chunk := truncateToWidth(remaining, chunkWidth)
-		result = append(result, prefix+chunk)
+		chunk := truncateToWidth(remaining, contentWidth)
+		result = append(result, chunk)
 		remaining = remaining[len(chunk):]
 	}
 
 	return result
+}
+
+// diffPrefix returns the prefix symbol for the current diff line type.
+func diffPrefix(lineType internal.LineType) string {
+	switch lineType {
+	case internal.LineAdd:
+		return "+"
+	case internal.LineDel:
+		return "-"
+	default:
+		return " "
+	}
+}
+
+// displayedLineNo selects the line number shown for one diff line.
+func displayedLineNo(line internal.DiffLine) int {
+	if line.Type == internal.LineDel {
+		return line.OldLineNo
+	}
+
+	return line.NewLineNo
+}
+
+// formatDisplayedLineNo renders one line number or spaces when the number is unknown.
+func formatDisplayedLineNo(lineNo, width int) string {
+	if lineNo == 0 {
+		return strings.Repeat(" ", width)
+	}
+
+	return fmt.Sprintf("%*d", width, lineNo)
 }
 
 // expandTabs replaces tab characters with spaces so width calculations match

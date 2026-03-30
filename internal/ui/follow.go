@@ -45,19 +45,13 @@ func hunkVisualOffset(file *internal.FileDiff, hunkIdx, width int) int {
 		return 0
 	}
 
+	contentWidth := max(1, width-gutterWidth(file, width))
 	offset := 0
 	for i := 0; i < hunkIdx && i < len(file.Hunks); i++ {
 		hunk := file.Hunks[i]
 		offset++
 		for _, line := range hunk.Lines {
-			switch line.Type {
-			case internal.LineAdd:
-				offset += len(wrapLineParts("+"+line.Content, width))
-			case internal.LineDel:
-				offset += len(wrapLineParts("-"+line.Content, width))
-			default:
-				offset += len(wrapLineParts(" "+line.Content, width))
-			}
+			offset += len(wrapLineParts(line.Content, contentWidth))
 		}
 	}
 
