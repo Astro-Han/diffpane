@@ -194,6 +194,56 @@ func TestModelOverlayQueuesUpdates(t *testing.T) {
 	}
 }
 
+// TestModelOverlayAppliesLatestQueuedSnapshot verifies overlay close uses the
+// newest queued snapshot even when it returns to the frozen file list.
+func TestModelOverlayAppliesLatestQueuedSnapshot(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		file("a.txt", 1),
+	})
+
+	opened, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	withOverlay := opened.(Model)
+	if !withOverlay.OverlayOpen {
+		t.Fatal("expected overlay to be open")
+	}
+
+	queuedChanged, _ := withOverlay.Update(FilesUpdatedMsg{
+		BaselineSHA: "sha",
+		Files: []internal.FileDiff{
+			file("a.txt", 2),
+		},
+		ChangedPaths: []string{"a.txt"},
+	})
+	withPending := queuedChanged.(Model)
+	if withPending.PendingUpdate == nil {
+		t.Fatal("expected first queued update")
+	}
+
+	queuedRestored, _ := withPending.Update(FilesUpdatedMsg{
+		BaselineSHA: "sha",
+		Files: []internal.FileDiff{
+			file("a.txt", 1),
+		},
+		ChangedPaths: []string{"a.txt"},
+	})
+	restoredPending := queuedRestored.(Model)
+	if restoredPending.PendingUpdate == nil {
+		t.Fatal("expected latest queued update")
+	}
+	if restoredPending.PendingUpdate.Files[0].AddCount != 1 {
+		t.Fatalf("pending add count = %d, want latest snapshot 1", restoredPending.PendingUpdate.Files[0].AddCount)
+	}
+
+	closed, _ := restoredPending.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	final := closed.(Model)
+	if final.OverlayOpen {
+		t.Fatal("expected overlay to close")
+	}
+	if final.Files[0].AddCount != 1 {
+		t.Fatalf("final add count = %d, want latest snapshot 1", final.Files[0].AddCount)
+	}
+}
+
 // TestModelIgnoresStaleFilesUpdate verifies out-of-date baseline updates do not overwrite state.
 func TestModelIgnoresStaleFilesUpdate(t *testing.T) {
 	model := NewModel("repo", "/tmp/repo", "new-sha", []internal.FileDiff{

@@ -143,9 +143,9 @@ func (m Model) handleFilesUpdated(msg FilesUpdatedMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Ignore repeated snapshots so the latest highlight batch persists until a
-	// real diff change or manual reset advances the epoch.
-	if reflect.DeepEqual(msg.Files, m.Files) {
+	// Compare against the latest effective snapshot, not always the frozen
+	// on-screen files, so overlay queues can still accept A -> B -> A updates.
+	if reflect.DeepEqual(msg.Files, m.effectiveFilesForComparison()) {
 		return m, nil
 	}
 
@@ -161,6 +161,15 @@ func (m Model) handleFilesUpdated(msg FilesUpdatedMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m.applyFilesUpdate(msg), nil
+}
+
+// effectiveFilesForComparison returns the newest diff snapshot that incoming
+// watcher updates should compare against for no-op detection.
+func (m Model) effectiveFilesForComparison() []internal.FileDiff {
+	if m.OverlayOpen && m.PendingUpdate != nil {
+		return m.PendingUpdate.Files
+	}
+	return m.Files
 }
 
 func (m Model) applyFilesUpdate(msg FilesUpdatedMsg) Model {
