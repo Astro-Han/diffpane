@@ -21,22 +21,34 @@ func hunkFingerprints(hunks []internal.DiffHunk) []uint64 {
 	return sigs
 }
 
-// lastChangedHunkIndex finds the newest hunk whose fingerprint was absent before.
-// Callers handle the "brand new path" case separately via prevHunkSigs membership.
-func lastChangedHunkIndex(oldSigs []uint64, newHunks []internal.DiffHunk) int {
-	seen := make(map[uint64]struct{}, len(oldSigs))
+// changedHunkIndices finds every hunk whose fingerprint count exceeds the previous snapshot.
+func changedHunkIndices(oldSigs []uint64, newHunks []internal.DiffHunk) []int {
+	seen := make(map[uint64]int, len(oldSigs))
 	for _, sig := range oldSigs {
-		seen[sig] = struct{}{}
+		seen[sig]++
 	}
 
-	newSigs := hunkFingerprints(newHunks)
-	for i := len(newSigs) - 1; i >= 0; i-- {
-		if _, ok := seen[newSigs[i]]; !ok {
-			return i
+	var changed []int
+	for i, sig := range hunkFingerprints(newHunks) {
+		if seen[sig] > 0 {
+			seen[sig]--
+			continue
 		}
+		changed = append(changed, i)
 	}
 
-	return -1
+	return changed
+}
+
+// lastChangedHunkIndex keeps legacy callers compiling until model follow logic
+// switches to highlighted-hunk state in a later TDD step.
+func lastChangedHunkIndex(oldSigs []uint64, newHunks []internal.DiffHunk) int {
+	changed := changedHunkIndices(oldSigs, newHunks)
+	if len(changed) == 0 {
+		return -1
+	}
+
+	return changed[len(changed)-1]
 }
 
 // hunkVisualOffset counts rendered rows before hunkIdx for follow-mode scrolling.

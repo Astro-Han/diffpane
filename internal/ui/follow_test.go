@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -55,8 +56,8 @@ func TestHunkFingerprintsChangeOnContent(t *testing.T) {
 	}
 }
 
-// TestLastChangedHunkIndex verifies set-based hunk detection across key cases.
-func TestLastChangedHunkIndex(t *testing.T) {
+// TestChangedHunkIndices verifies multiset-based hunk detection across key cases.
+func TestChangedHunkIndices(t *testing.T) {
 	baseHunks := []internal.DiffHunk{
 		testHunk("@@ -1,1 +1,1 @@", 10, addLine("a")),
 		testHunk("@@ -2,1 +2,1 @@", 20, addLine("b")),
@@ -67,7 +68,7 @@ func TestLastChangedHunkIndex(t *testing.T) {
 		name     string
 		oldSigs  []uint64
 		newHunks []internal.DiffHunk
-		want     int
+		want     []int
 	}{
 		{
 			name:    "no change",
@@ -76,7 +77,7 @@ func TestLastChangedHunkIndex(t *testing.T) {
 				testHunk("@@ -10,1 +10,1 @@", 100, addLine("a")),
 				testHunk("@@ -20,1 +20,1 @@", 200, addLine("b")),
 			},
-			want: -1,
+			want: nil,
 		},
 		{
 			name:    "content modification",
@@ -85,7 +86,7 @@ func TestLastChangedHunkIndex(t *testing.T) {
 				testHunk("@@ -1,1 +1,1 @@", 10, addLine("a")),
 				testHunk("@@ -2,1 +2,1 @@", 20, addLine("changed")),
 			},
-			want: 1,
+			want: []int{1},
 		},
 		{
 			name:    "hunk insertion",
@@ -95,7 +96,7 @@ func TestLastChangedHunkIndex(t *testing.T) {
 				testHunk("@@ -3,1 +3,1 @@", 15, addLine("inserted")),
 				testHunk("@@ -2,1 +2,1 @@", 20, addLine("b")),
 			},
-			want: 1,
+			want: []int{1},
 		},
 		{
 			name: "hunk removal",
@@ -108,7 +109,7 @@ func TestLastChangedHunkIndex(t *testing.T) {
 				testHunk("@@ -1,1 +1,1 @@", 10, addLine("a")),
 				testHunk("@@ -3,1 +3,1 @@", 30, addLine("c")),
 			},
-			want: -1,
+			want: nil,
 		},
 		{
 			name:    "empty previous set",
@@ -117,7 +118,7 @@ func TestLastChangedHunkIndex(t *testing.T) {
 				testHunk("@@ -1,1 +1,1 @@", 10, addLine("a")),
 				testHunk("@@ -2,1 +2,1 @@", 20, addLine("b")),
 			},
-			want: 1,
+			want: []int{0, 1},
 		},
 		{
 			name: "duplicate hunk content",
@@ -128,15 +129,15 @@ func TestLastChangedHunkIndex(t *testing.T) {
 				testHunk("@@ -1,1 +1,1 @@", 10, addLine("same")),
 				testHunk("@@ -2,1 +2,1 @@", 20, addLine("same")),
 			},
-			want: -1,
+			want: []int{1},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := lastChangedHunkIndex(tt.oldSigs, tt.newHunks)
-			if got != tt.want {
-				t.Fatalf("lastChangedHunkIndex() = %d, want %d", got, tt.want)
+			got := changedHunkIndices(tt.oldSigs, tt.newHunks)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("changedHunkIndices() = %#v, want %#v", got, tt.want)
 			}
 		})
 	}
