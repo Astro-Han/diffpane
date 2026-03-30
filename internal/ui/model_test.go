@@ -55,9 +55,6 @@ func TestModelFollowSelectsLatestChanged(t *testing.T) {
 	if got.CurrentIdx != 2 {
 		t.Fatalf("CurrentIdx = %d, want 2", got.CurrentIdx)
 	}
-	if got.NewCount != 0 {
-		t.Fatalf("NewCount = %d, want 0", got.NewCount)
-	}
 }
 
 // TestModelFollowUsesMostRecentChangedPath verifies active follow mode prefers
@@ -107,9 +104,6 @@ func TestModelPausedFollowTracksLastChangedPath(t *testing.T) {
 	if got.CurrentIdx != 0 {
 		t.Fatalf("CurrentIdx = %d, want 0", got.CurrentIdx)
 	}
-	if got.NewCount != 0 {
-		t.Fatalf("NewCount = %d, want 0", got.NewCount)
-	}
 	if got.lastChangedPath != "c.txt" {
 		t.Fatalf("lastChangedPath = %q, want c.txt", got.lastChangedPath)
 	}
@@ -132,11 +126,8 @@ func TestModelPausedFollowIgnoresVanishedChangedPaths(t *testing.T) {
 	})
 
 	got := updated.(Model)
-	if got.NewCount != 0 {
-		t.Fatalf("NewCount = %d, want 0", got.NewCount)
-	}
-	if len(got.NewFiles) != 0 {
-		t.Fatalf("NewFiles = %#v, want empty", got.NewFiles)
+	if got.lastChangedPath != "" {
+		t.Fatalf("lastChangedPath = %q, want empty", got.lastChangedPath)
 	}
 }
 
@@ -242,9 +233,6 @@ func TestModelRestoreFollowJumpsToLatestChanged(t *testing.T) {
 	}
 	if got.CurrentIdx != 2 {
 		t.Fatalf("CurrentIdx = %d, want 2", got.CurrentIdx)
-	}
-	if got.NewCount != 0 {
-		t.Fatalf("NewCount = %d, want 0", got.NewCount)
 	}
 }
 
@@ -789,14 +777,8 @@ func TestModelManualResetReplacesQueuedOverlayUpdate(t *testing.T) {
 	if len(got.Files) != 1 || got.Files[0].Path != "fresh.txt" {
 		t.Fatalf("Files = %v, want [fresh.txt]", got.Files)
 	}
-	if got.NewCount != 0 {
-		t.Fatalf("NewCount = %d, want 0 after reset", got.NewCount)
-	}
-	if len(got.NewFiles) != 0 {
-		t.Fatalf("NewFiles = %v, want empty after reset", got.NewFiles)
-	}
-	if got.LastChangedPath != "" {
-		t.Fatalf("LastChangedPath = %q, want empty after reset", got.LastChangedPath)
+	if got.lastChangedPath != "" {
+		t.Fatalf("lastChangedPath = %q, want empty after reset", got.lastChangedPath)
 	}
 }
 

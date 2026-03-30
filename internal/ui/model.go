@@ -23,9 +23,6 @@ type Model struct {
 	highlightedHunks map[string]map[int]bool
 	lastChangedPath string
 	lastHighlightedPath string
-	NewCount        int
-	NewFiles        map[string]bool
-	LastChangedPath string
 	// followTargetPath/hunk track the last auto-follow target for resize recalculation.
 	followTargetPath string
 	followTargetHunk int
@@ -61,7 +58,6 @@ func NewModel(dirName, repoDir, baselineSHA string, files []internal.FileDiff) M
 		FollowOn:     true,
 		hunkSigs:     buildPrevHunkSigs(files),
 		highlightedHunks: make(map[string]map[int]bool),
-		NewFiles:     make(map[string]bool),
 		displayCache: newDisplayLineCache(),
 	}
 }
@@ -89,9 +85,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.highlightedHunks = make(map[string]map[int]bool)
 		m.lastChangedPath = ""
 		m.lastHighlightedPath = ""
-		m.NewCount = 0
-		m.NewFiles = make(map[string]bool)
-		m.LastChangedPath = ""
 		m.clearFollowTarget()
 		// Manual reset starts a new baseline epoch, so any queued pre-reset
 		// update must be replaced rather than merged.
@@ -186,9 +179,6 @@ func (m Model) applyFilesUpdate(msg FilesUpdatedMsg) Model {
 
 	m.lastChangedPath = lastChangedPathInFiles(msg.ChangedPaths, m.Files)
 	m.lastHighlightedPath = lastHighlightedPathInFiles(msg.ChangedPaths, m.highlightedHunks, m.Files)
-	m.LastChangedPath = m.lastChangedPath
-	m.NewCount = 0
-	m.NewFiles = make(map[string]bool)
 
 	if len(m.Files) == 0 {
 		m.CurrentIdx = 0
@@ -197,9 +187,6 @@ func (m Model) applyFilesUpdate(msg FilesUpdatedMsg) Model {
 		m.highlightedHunks = make(map[string]map[int]bool)
 		m.lastChangedPath = ""
 		m.lastHighlightedPath = ""
-		m.NewFiles = make(map[string]bool)
-		m.LastChangedPath = ""
-		m.NewCount = 0
 		m.clearFollowTarget()
 		m.clampScrollOffset()
 		return m
@@ -523,7 +510,7 @@ func (m Model) View() string {
 	}
 
 	diffHeight := max(0, m.Height-2)
-	header := RenderHeader(m.DirName, m.Files, m.CurrentIdx, m.NewCount, m.Width)
+	header := RenderHeader(m.DirName, m.Files, m.CurrentIdx, m.Width)
 	footer := RenderFooter(m.FollowOn, m.Notification, m.Width)
 
 	var content string
