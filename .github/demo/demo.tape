@@ -1,13 +1,13 @@
 # diffpane demo GIF recording
 #
 # Steps:
-#   1. bash demo-simulate.sh          (create test repo)
-#   2. go build -o /tmp/diffpane-bin   (build binary)
-#   3. vhs demo.tape                   (record)
+#   1. bash .github/demo/demo-simulate.sh   (create test repo)
+#   2. go build -o /tmp/diffpane-bin        (build binary)
+#   3. cd .github/demo && vhs demo.tape     (record)
 #
-# Output: demo.gif in repo root
+# Output: .github/demo.gif
 
-Output demo.gif
+Output ../demo.gif
 
 Set Shell "zsh"
 Set Width 720
@@ -24,7 +24,7 @@ Hide
 Type "cd /tmp/diffpane-demo"
 Enter
 Sleep 500ms
-Type "(bash /Users/yuhan/workspace/dev/diffpane/demo-changes.sh &)"
+Type "(bash /Users/yuhan/workspace/dev/diffpane/.github/demo/demo-changes.sh &)"
 Enter
 Sleep 500ms
 Type "DIFFPANE_THEME=dark /tmp/diffpane-bin"
