@@ -74,9 +74,9 @@ func newDisplayLineCacheKey(file *internal.FileDiff, width int) displayLineCache
 
 	hasher := fnv.New64a()
 	for _, hunk := range file.Hunks {
-		_, _ = hasher.Write([]byte(fmt.Sprintf("%d\x00", hunk.StartLine)))
+		_, _ = hasher.Write([]byte(fmt.Sprintf("%d\x00%d\x00", hunk.OldStartLine, hunk.StartLine)))
 		for _, line := range hunk.Lines {
-			_, _ = hasher.Write([]byte(fmt.Sprintf("%d\x00%s\x00", line.Type, line.Content)))
+			_, _ = hasher.Write([]byte(fmt.Sprintf("%d\x00%d\x00%d\x00%s\x00", line.Type, line.OldLineNo, line.NewLineNo, line.Content)))
 		}
 	}
 	key.signature = hasher.Sum64()

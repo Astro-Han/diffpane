@@ -16,11 +16,17 @@ const (
 type DiffLine struct {
 	Type    LineType
 	Content string
+	// OldLineNo is the source file line number for deleted or context lines.
+	OldLineNo int
+	// NewLineNo is the destination file line number for added or context lines.
+	NewLineNo int
 }
 
 // DiffHunk stores one @@ block from a unified diff.
 type DiffHunk struct {
 	Header string
+	// OldStartLine is the first line number in the old-file range from the hunk header.
+	OldStartLine int
 	// StartLine is the first line number in the new-file range from the hunk header.
 	StartLine int
 	Lines     []DiffLine

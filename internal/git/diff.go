@@ -151,10 +151,11 @@ func buildNewFileDiff(path, content string) internal.FileDiff {
 	}
 
 	var diffLines []internal.DiffLine
-	for _, line := range lines {
+	for i, line := range lines {
 		diffLines = append(diffLines, internal.DiffLine{
-			Type:    internal.LineAdd,
-			Content: line,
+			Type:      internal.LineAdd,
+			Content:   line,
+			NewLineNo: i + 1,
 		})
 	}
 

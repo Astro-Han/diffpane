@@ -474,3 +474,38 @@ func TestDisplayLineCacheReusesBuilderOutput(t *testing.T) {
 		t.Fatalf("cached lines = %#v, want %#v", second, first)
 	}
 }
+
+// TestDisplayLineCacheKeyChangesWhenLineNumbersShift verifies the cache key
+// changes when line-number metadata changes but line content stays the same.
+func TestDisplayLineCacheKeyChangesWhenLineNumbersShift(t *testing.T) {
+	base := &internal.FileDiff{
+		Path: "main.go",
+		Hunks: []internal.DiffHunk{{
+			Header:       "@@ -1,1 +1,1 @@",
+			OldStartLine: 1,
+			StartLine:    1,
+			Lines: []internal.DiffLine{{
+				Type:      internal.LineAdd,
+				Content:   "func main() {}",
+				NewLineNo: 1,
+			}},
+		}},
+	}
+	shifted := &internal.FileDiff{
+		Path: "main.go",
+		Hunks: []internal.DiffHunk{{
+			Header:       "@@ -9,1 +9,1 @@",
+			OldStartLine: 9,
+			StartLine:    9,
+			Lines: []internal.DiffLine{{
+				Type:      internal.LineAdd,
+				Content:   "func main() {}",
+				NewLineNo: 9,
+			}},
+		}},
+	}
+
+	if newDisplayLineCacheKey(base, 80) == newDisplayLineCacheKey(shifted, 80) {
+		t.Fatal("cache key should change when displayed line numbers shift")
+	}
+}

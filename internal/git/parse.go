@@ -8,9 +8,10 @@ import (
 	"github.com/Astro-Han/diffpane/internal"
 )
 
-// hunkHeaderRe extracts the new-file start line from a unified diff hunk header.
-// The count after the comma is optional when git omits a value of 1.
-var hunkHeaderRe = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
+// hunkHeaderRe extracts both old-file and new-file start lines from a unified
+// diff hunk header. The count after the comma is optional when git omits a
+// value of 1.
+var hunkHeaderRe = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
 
 // ParseDiff parses unified git diff output into file-level diff data.
 func ParseDiff(raw string) []internal.FileDiff {
@@ -25,6 +26,25 @@ func ParseDiff(raw string) []internal.FileDiff {
 	// flushHunk appends the current hunk before the parser moves on.
 	flushHunk := func() {
 		if current != nil && hunk != nil {
+			if hunk.OldStartLine != 0 || hunk.StartLine != 0 {
+				oldLineNo := hunk.OldStartLine
+				newLineNo := hunk.StartLine
+				for i := range hunk.Lines {
+					switch hunk.Lines[i].Type {
+					case internal.LineContext:
+						hunk.Lines[i].OldLineNo = oldLineNo
+						hunk.Lines[i].NewLineNo = newLineNo
+						oldLineNo++
+						newLineNo++
+					case internal.LineAdd:
+						hunk.Lines[i].NewLineNo = newLineNo
+						newLineNo++
+					case internal.LineDel:
+						hunk.Lines[i].OldLineNo = oldLineNo
+						oldLineNo++
+					}
+				}
+			}
 			current.Hunks = append(current.Hunks, *hunk)
 			hunk = nil
 		}
@@ -76,13 +96,16 @@ func ParseDiff(raw string) []internal.FileDiff {
 			// Skip metadata lines that do not belong to hunk content.
 		case strings.HasPrefix(line, "@@"):
 			flushHunk()
+			oldStartLine := 0
 			startLine := 0
 			if match := hunkHeaderRe.FindStringSubmatch(line); match != nil {
-				startLine, _ = strconv.Atoi(match[1])
+				oldStartLine, _ = strconv.Atoi(match[1])
+				startLine, _ = strconv.Atoi(match[2])
 			}
 			hunk = &internal.DiffHunk{
-				Header:    line,
-				StartLine: startLine,
+				Header:       line,
+				OldStartLine: oldStartLine,
+				StartLine:    startLine,
 			}
 		default:
 			if hunk == nil {

@@ -18,6 +18,29 @@ func TestDiffHunkHasStartLineField(t *testing.T) {
 	}
 }
 
+// TestDiffLineHasLineNumberFields verifies diff lines expose both old-side and
+// new-side line numbers for later rendering.
+func TestDiffLineHasLineNumberFields(t *testing.T) {
+	field, ok := reflect.TypeOf(internal.DiffLine{}).FieldByName("OldLineNo")
+	if !ok || field.Type.Kind() != reflect.Int {
+		t.Fatal("DiffLine should include OldLineNo int field")
+	}
+
+	field, ok = reflect.TypeOf(internal.DiffLine{}).FieldByName("NewLineNo")
+	if !ok || field.Type.Kind() != reflect.Int {
+		t.Fatal("DiffLine should include NewLineNo int field")
+	}
+}
+
+// TestDiffHunkHasOldStartLineField verifies hunks expose the old-side start
+// line so deleted rows can render the correct numbers.
+func TestDiffHunkHasOldStartLineField(t *testing.T) {
+	field, ok := reflect.TypeOf(internal.DiffHunk{}).FieldByName("OldStartLine")
+	if !ok || field.Type.Kind() != reflect.Int {
+		t.Fatal("DiffHunk should include OldStartLine int field")
+	}
+}
+
 func TestParseDiffSingleFile(t *testing.T) {
 	input := `diff --git a/src/auth.ts b/src/auth.ts
 index abc1234..def5678 100644
@@ -47,6 +70,50 @@ index abc1234..def5678 100644
 	}
 	if file.Hunks[0].StartLine != 47 {
 		t.Fatalf("StartLine = %d, want 47", file.Hunks[0].StartLine)
+	}
+}
+
+// TestParseDiffAssignsOldAndNewLineNumbers verifies line numbers are assigned
+// during parsing for context, deleted, and added lines.
+func TestParseDiffAssignsOldAndNewLineNumbers(t *testing.T) {
+	input := `diff --git a/a.txt b/a.txt
+--- a/a.txt
++++ b/a.txt
+@@ -10,2 +20,3 @@
+ line1
+-line2
++line2 changed
++line3
+`
+
+	file := ParseDiff(input)[0]
+	lines := file.Hunks[0].Lines
+
+	if lines[0].OldLineNo != 10 || lines[0].NewLineNo != 20 {
+		t.Fatalf("context line numbers = (%d,%d), want (10,20)", lines[0].OldLineNo, lines[0].NewLineNo)
+	}
+	if lines[1].OldLineNo != 11 || lines[1].NewLineNo != 0 {
+		t.Fatalf("deleted line numbers = (%d,%d), want (11,0)", lines[1].OldLineNo, lines[1].NewLineNo)
+	}
+	if lines[2].OldLineNo != 0 || lines[2].NewLineNo != 21 {
+		t.Fatalf("added line numbers = (%d,%d), want (0,21)", lines[2].OldLineNo, lines[2].NewLineNo)
+	}
+}
+
+// TestParseDiffMalformedHeaderLeavesLineNumbersBlank verifies malformed hunk
+// headers do not invent line numbers.
+func TestParseDiffMalformedHeaderLeavesLineNumbersBlank(t *testing.T) {
+	input := `diff --git a/x.txt b/x.txt
+--- a/x.txt
++++ b/x.txt
+@@ broken header @@
++added line
+`
+
+	file := ParseDiff(input)[0]
+	line := file.Hunks[0].Lines[0]
+	if line.OldLineNo != 0 || line.NewLineNo != 0 {
+		t.Fatalf("malformed header line numbers = (%d,%d), want zeros", line.OldLineNo, line.NewLineNo)
 	}
 }
 
@@ -208,5 +275,14 @@ func TestBuildNewFileDiffStartLine(t *testing.T) {
 	}
 	if diff.Hunks[0].StartLine != 1 {
 		t.Fatalf("StartLine = %d, want 1", diff.Hunks[0].StartLine)
+	}
+}
+
+// TestBuildNewFileDiffLineNumbers verifies synthetic added-file diffs stamp
+// the new-file line numbers onto each generated line.
+func TestBuildNewFileDiffLineNumbers(t *testing.T) {
+	diff := buildNewFileDiff("new.txt", "line1\nline2\n")
+	if diff.Hunks[0].Lines[0].NewLineNo != 1 || diff.Hunks[0].Lines[1].NewLineNo != 2 {
+		t.Fatalf("new file line numbers = %d,%d, want 1,2", diff.Hunks[0].Lines[0].NewLineNo, diff.Hunks[0].Lines[1].NewLineNo)
 	}
 }
