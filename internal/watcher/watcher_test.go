@@ -78,6 +78,39 @@ func TestReportError(t *testing.T) {
 	}
 }
 
+// TestIsMetadataOnlyEvent verifies pure chmod notifications do not trigger a
+// diff refresh, while real content-changing events still pass through.
+func TestIsMetadataOnlyEvent(t *testing.T) {
+	tests := []struct {
+		name  string
+		event fsnotify.Event
+		want  bool
+	}{
+		{
+			name:  "pure chmod",
+			event: fsnotify.Event{Op: fsnotify.Chmod},
+			want:  true,
+		},
+		{
+			name:  "write plus chmod",
+			event: fsnotify.Event{Op: fsnotify.Write | fsnotify.Chmod},
+			want:  false,
+		},
+		{
+			name:  "write only",
+			event: fsnotify.Event{Op: fsnotify.Write},
+			want:  false,
+		},
+	}
+
+	for _, tc := range tests {
+		got := isMetadataOnlyEvent(tc.event)
+		if got != tc.want {
+			t.Fatalf("%s: isMetadataOnlyEvent(%v) = %v, want %v", tc.name, tc.event.Op, got, tc.want)
+		}
+	}
+}
+
 // TestAddDirRecursiveSkipsIgnoredDirectories verifies startup watching does not
 // recurse into directories git would ignore.
 func TestAddDirRecursiveSkipsIgnoredDirectories(t *testing.T) {

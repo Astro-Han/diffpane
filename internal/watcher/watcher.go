@@ -94,6 +94,9 @@ func (fw *FileWatcher) loop() {
 			}
 
 			path := event.Name
+			if isMetadataOnlyEvent(event) {
+				continue
+			}
 			refreshExclude := isGitInfoExcludePath(path, fw.gitDir) || isGitInfoExcludePath(path, fw.commonGitDir)
 			if !refreshExclude && (isGitInternalPath(path, fw.gitDir) || isGitInternalPath(path, fw.commonGitDir)) {
 				if isHeadOrRefPath(path, fw.gitDir) || isHeadOrRefPath(path, fw.commonGitDir) {
@@ -136,6 +139,16 @@ func (fw *FileWatcher) loop() {
 			return
 		}
 	}
+}
+
+// isMetadataOnlyEvent reports whether fsnotify delivered a chmod-only event
+// that does not carry any content or path change signal.
+func isMetadataOnlyEvent(event fsnotify.Event) bool {
+	return event.Has(fsnotify.Chmod) &&
+		!event.Has(fsnotify.Write) &&
+		!event.Has(fsnotify.Create) &&
+		!event.Has(fsnotify.Remove) &&
+		!event.Has(fsnotify.Rename)
 }
 
 // Stop closes underlying watchers and timers.
