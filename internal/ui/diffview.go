@@ -7,7 +7,9 @@ import (
 	"sync"
 
 	"github.com/Astro-Han/diffpane/internal"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
+	"github.com/muesli/termenv"
 )
 
 const terminalTabStop = 8
@@ -164,7 +166,11 @@ func renderSeparator(startLine, width int) string {
 		if count < 1 {
 			count = 1
 		}
-		return StyleDim.Render(strings.Repeat(dash, count))
+		text := strings.Repeat(dash, count)
+		if colorProfileFn() == termenv.Ascii {
+			return text
+		}
+		return StyleDim.Render(text)
 	}
 
 	if startLine <= 1 {
@@ -177,7 +183,11 @@ func renderSeparator(startLine, width int) string {
 		return plainSeparator()
 	}
 
-	return StyleDim.Render("──" + label + strings.Repeat(dash, width-runewidth.StringWidth("──"+label)))
+	text := "──" + label + strings.Repeat(dash, width-runewidth.StringWidth("──"+label))
+	if colorProfileFn() == termenv.Ascii {
+		return text
+	}
+	return StyleDim.Render(text)
 }
 
 // diffDisplayLines expands one file diff into the exact visual lines shown in the viewport.
@@ -186,6 +196,9 @@ func diffDisplayLines(file *internal.FileDiff, width int) []string {
 		return nil
 	}
 	if file.IsBinary {
+		if colorProfileFn() == termenv.Ascii {
+			return []string{"Binary file changed"}
+		}
 		return []string{StyleDim.Render("Binary file changed")}
 	}
 
@@ -203,7 +216,7 @@ func diffDisplayLines(file *internal.FileDiff, width int) []string {
 					if i == 0 {
 						prefix = diffPrefix(diffLine.Type)
 					}
-					lines = append(lines, styleDiffPrefix(prefix, diffLine.Type)+highlightDiffSegment(segment, file.Path))
+					lines = append(lines, renderDiffSegment("", prefix, segment, diffLine.Type, width, file.Path))
 					continue
 				}
 
@@ -213,7 +226,7 @@ func diffDisplayLines(file *internal.FileDiff, width int) []string {
 					lineNoText = formatDisplayedLineNo(lineNo, lineNumberWidth)
 					prefix = diffPrefix(diffLine.Type)
 				}
-				lines = append(lines, StyleDim.Render(lineNoText)+" "+styleDiffPrefix(prefix, diffLine.Type)+highlightDiffSegment(segment, file.Path))
+				lines = append(lines, renderDiffSegment(lineNoText, prefix, segment, diffLine.Type, width, file.Path))
 			}
 		}
 	}
@@ -258,6 +271,10 @@ func highlightDiffSegment(segment, filename string) string {
 // styleDiffPrefix applies the existing add/delete color to the diff prefix
 // while leaving context-line prefixes unstyled.
 func styleDiffPrefix(prefix string, lineType internal.LineType) string {
+	if colorProfileFn() == termenv.Ascii || colorProfileFn() == termenv.TrueColor {
+		return prefix
+	}
+
 	switch lineType {
 	case internal.LineAdd:
 		return StyleAdd.Render(prefix)
@@ -316,6 +333,58 @@ func formatDisplayedLineNo(lineNo, width int) string {
 	}
 
 	return fmt.Sprintf("%*d", width, lineNo)
+}
+
+// resolvedBgHex selects the light or dark adaptive color variant for the
+// current terminal background.
+func resolvedBgHex(color lipgloss.AdaptiveColor) string {
+	if hasDarkBackgroundFn() {
+		return color.Dark
+	}
+
+	return color.Light
+}
+
+// renderDiffSegment assembles one visual row and applies low-color prefix
+// styling or true-color backgrounds depending on terminal capability.
+func renderDiffSegment(lineNoText, prefix, code string, lineType internal.LineType, width int, filename string) string {
+	highlighted := highlightDiffSegment(code, filename)
+	if lineNoText == "" {
+		assembled := styleDiffPrefix(prefix, lineType) + highlighted
+		if colorProfileFn() != termenv.TrueColor {
+			return assembled
+		}
+
+		padded := assembled + strings.Repeat(" ", max(0, width-lipgloss.Width(assembled)))
+		switch lineType {
+		case internal.LineAdd:
+			return applyBg(padded, resolvedBgHex(BgAdd))
+		case internal.LineDel:
+			return applyBg(padded, resolvedBgHex(BgDel))
+		default:
+			return padded
+		}
+	}
+
+	lineNoRender := lineNoText
+	if colorProfileFn() != termenv.Ascii {
+		lineNoRender = StyleDim.Render(lineNoText)
+	}
+
+	assembled := lineNoRender + " " + styleDiffPrefix(prefix, lineType) + highlighted
+	if colorProfileFn() != termenv.TrueColor {
+		return assembled
+	}
+
+	padded := assembled + strings.Repeat(" ", max(0, width-lipgloss.Width(assembled)))
+	switch lineType {
+	case internal.LineAdd:
+		return applyBg(padded, resolvedBgHex(BgAdd))
+	case internal.LineDel:
+		return applyBg(padded, resolvedBgHex(BgDel))
+	default:
+		return padded
+	}
 }
 
 // expandTabs replaces tab characters with spaces so width calculations match

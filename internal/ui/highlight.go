@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 
@@ -23,10 +24,17 @@ var (
 	chromaStyleName string
 )
 
+var (
+	// colorProfileFn is overrideable in tests so rendering can force a specific terminal profile.
+	colorProfileFn = termenv.ColorProfile
+	// hasDarkBackgroundFn is overrideable in tests so adaptive background colors resolve deterministically.
+	hasDarkBackgroundFn = termenv.HasDarkBackground
+)
+
 // getChromaStyleName returns the chroma style that best matches the terminal background.
 func getChromaStyleName() string {
 	chromaStyleOnce.Do(func() {
-		if termenv.HasDarkBackground() {
+		if hasDarkBackgroundFn() {
 			chromaStyleName = "monokai"
 			return
 		}
@@ -69,6 +77,9 @@ func HighlightCode(code, filename string) string {
 	if code == "" || filename == "" {
 		return code
 	}
+	if colorProfileFn() == termenv.Ascii {
+		return code
+	}
 
 	lexer := getLexer(filename)
 	if lexer == nil {
@@ -80,7 +91,15 @@ func HighlightCode(code, filename string) string {
 		return code
 	}
 
-	formatter := formatters.Get("terminal256")
+	formatterName := "terminal"
+	switch colorProfileFn() {
+	case termenv.TrueColor:
+		formatterName = "terminal16m"
+	case termenv.ANSI256:
+		formatterName = "terminal256"
+	}
+
+	formatter := formatters.Get(formatterName)
 	style := styles.Get(getChromaStyleName())
 
 	var builder strings.Builder
@@ -91,4 +110,24 @@ func HighlightCode(code, filename string) string {
 	// chroma appends one trailing newline for terminal output, which would
 	// otherwise create an extra wrapped row in the diff view.
 	return strings.TrimSuffix(builder.String(), "\n")
+}
+
+// applyBg re-injects the background after each ANSI reset so syntax-highlighted
+// output keeps one continuous line background. Verified against chroma v2.23.1
+// and lipgloss v1.1.0, which both emit \033[0m resets.
+func applyBg(text, hexColor string) string {
+	if hexColor == "" {
+		return text
+	}
+
+	bgSeq := hexToBgANSI(hexColor)
+	result := strings.ReplaceAll(text, "\033[0m", "\033[0m"+bgSeq)
+	return bgSeq + result + "\033[0m"
+}
+
+// hexToBgANSI converts #RRGGBB to a true-color background escape sequence.
+func hexToBgANSI(hex string) string {
+	var r, g, b int
+	fmt.Sscanf(hex, "#%02x%02x%02x", &r, &g, &b)
+	return fmt.Sprintf("\033[48;2;%d;%d;%dm", r, g, b)
 }

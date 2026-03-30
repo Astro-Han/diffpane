@@ -7,6 +7,10 @@ var (
 	ColorAdd = lipgloss.AdaptiveColor{Light: "#22863a", Dark: "#56d364"}
 	// ColorDel colors deleted lines and counters.
 	ColorDel = lipgloss.AdaptiveColor{Light: "#cb2431", Dark: "#f85149"}
+	// BgAdd colors added-line backgrounds in true-color terminals.
+	BgAdd = lipgloss.AdaptiveColor{Light: "#dafbe1", Dark: "#002200"}
+	// BgDel colors deleted-line backgrounds in true-color terminals.
+	BgDel = lipgloss.AdaptiveColor{Light: "#ffebe9", Dark: "#330000"}
 	// ColorDim colors neutral metadata such as headers and footer text.
 	ColorDim = lipgloss.AdaptiveColor{Light: "#6a737d", Dark: "#8b949e"}
 

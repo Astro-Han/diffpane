@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
+	"github.com/muesli/termenv"
 )
 
 // terminalRows reports how many physical terminal rows one rendered line uses
@@ -321,6 +322,10 @@ func TestDiffDisplayLinesTabLineFitsNarrowViewport(t *testing.T) {
 // TestDiffDisplayLinesGoFileHighlighted verifies Go diffs get syntax colors
 // in addition to the diff prefix styling.
 func TestDiffDisplayLinesGoFileHighlighted(t *testing.T) {
+	prev := colorProfileFn
+	colorProfileFn = func() termenv.Profile { return termenv.ANSI256 }
+	defer func() { colorProfileFn = prev }()
+
 	file := &internal.FileDiff{
 		Path: "main.go",
 		Hunks: []internal.DiffHunk{{
@@ -377,6 +382,10 @@ func TestDiffDisplayLinesPlaintextNoHighlight(t *testing.T) {
 // TestDiffDisplayLinesWrappedContinuationHighlighted verifies wrapped code
 // segments keep continuation prefixes while still getting syntax colors.
 func TestDiffDisplayLinesWrappedContinuationHighlighted(t *testing.T) {
+	prev := colorProfileFn
+	colorProfileFn = func() termenv.Profile { return termenv.ANSI256 }
+	defer func() { colorProfileFn = prev }()
+
 	file := &internal.FileDiff{
 		Path: "main.go",
 		Hunks: []internal.DiffHunk{{
@@ -689,5 +698,79 @@ func TestCountWrappedDiffLinesMatchesRenderedLinesAfterGutterRefactor(t *testing
 	width := 32
 	if got, want := countWrappedDiffLines(file, width), len(diffDisplayLines(file, width)); got != want {
 		t.Fatalf("countWrappedDiffLines() = %d, want %d", got, want)
+	}
+}
+
+// TestDiffDisplayLinesTrueColorPadsBackgroundAcrossViewport verifies add lines
+// paint a full-width background in true-color terminals.
+func TestDiffDisplayLinesTrueColorPadsBackgroundAcrossViewport(t *testing.T) {
+	prevProfile := colorProfileFn
+	prevBg := hasDarkBackgroundFn
+	colorProfileFn = func() termenv.Profile { return termenv.TrueColor }
+	hasDarkBackgroundFn = func() bool { return true }
+	defer func() {
+		colorProfileFn = prevProfile
+		hasDarkBackgroundFn = prevBg
+	}()
+
+	file := &internal.FileDiff{
+		Path: "main.go",
+		Hunks: []internal.DiffHunk{{
+			Header: "@@ -0,0 +1,1 @@",
+			Lines: []internal.DiffLine{{
+				Type:      internal.LineAdd,
+				Content:   "func main() {",
+				NewLineNo: 1,
+			}},
+		}},
+	}
+
+	line := diffDisplayLines(file, 30)[1]
+	if !strings.Contains(line, "\033[48;2;") {
+		t.Fatalf("true-color add line should contain background ANSI, got %q", line)
+	}
+	if lipgloss.Width(line) != 30 {
+		t.Fatalf("rendered width = %d, want 30", lipgloss.Width(line))
+	}
+}
+
+// TestDiffDisplayLinesAnsi256KeepsColoredPrefixWithoutBackground verifies
+// non-truecolor terminals stay on the old foreground-only add/delete signal.
+func TestDiffDisplayLinesAnsi256KeepsColoredPrefixWithoutBackground(t *testing.T) {
+	prev := colorProfileFn
+	colorProfileFn = func() termenv.Profile { return termenv.ANSI256 }
+	defer func() { colorProfileFn = prev }()
+
+	file := &internal.FileDiff{
+		Path: "main.go",
+		Hunks: []internal.DiffHunk{{
+			Header: "@@ -0,0 +1,1 @@",
+			Lines: []internal.DiffLine{{
+				Type:      internal.LineAdd,
+				Content:   "func main() {",
+				NewLineNo: 1,
+			}},
+		}},
+	}
+
+	line := diffDisplayLines(file, 30)[1]
+	if strings.Contains(line, "\033[48;2;") {
+		t.Fatalf("ANSI256 profile should not contain true-color background, got %q", line)
+	}
+	if !strings.Contains(line, "\033[") {
+		t.Fatalf("ANSI256 profile should still style the prefix, got %q", line)
+	}
+}
+
+// TestRenderSeparatorAsciiProfileHasNoANSI verifies Ascii mode removes ANSI
+// styling from separators as well.
+func TestRenderSeparatorAsciiProfileHasNoANSI(t *testing.T) {
+	prev := colorProfileFn
+	colorProfileFn = func() termenv.Profile { return termenv.Ascii }
+	defer func() { colorProfileFn = prev }()
+
+	line := renderSeparator(38, 24)
+	if line != ansi.Strip(line) {
+		t.Fatalf("Ascii separator should not contain ANSI codes, got %q", line)
 	}
 }
