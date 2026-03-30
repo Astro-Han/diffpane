@@ -13,7 +13,7 @@ diffpane sits next to your agent and shows every change as it happens. Git is th
 ## Features
 
 - **Session baseline** - See cumulative changes across your entire session. diffpane records your starting point and diffs everything against it. Press `r` to reset.
-- **Follow mode** - Auto-jumps to the latest changed file and scrolls to the newest change. When you navigate manually, follow pauses and shows `+N new` so you don't miss anything.
+- **Follow mode** - Auto-jumps to the latest changed file and scrolls to the newest change. When you navigate manually, follow pauses until you resume it with `f`.
 - **Syntax highlighting** - Added and removed lines are color-coded with background colors, so you can tell what changed at a glance. Adapts to dark and light terminals automatically.
 - **Zero config** - Single binary, requires only git. Run `diffpane` in any git repo and it works.
 
