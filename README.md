@@ -6,9 +6,9 @@ Real-time TUI diff viewer for AI coding agents.
 
 ## Why
 
-AI coding agents change files fast, across multiple directories. Without a dedicated viewer, you're left running `git diff` over and over, or trusting changes you haven't seen.
+AI coding agents like [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex CLI](https://github.com/openai/codex), and [OpenCode](https://github.com/opencode-ai/opencode) change files fast, across multiple directories. Without a dedicated viewer, you're juggling `git diff` + lazygit + delta just to keep up, or trusting changes you haven't seen.
 
-diffpane sits next to your agent and shows every change as it happens. Git is the single source of truth. What you see is what git sees.
+diffpane replaces that with one command. It sits next to your agent and auto-follows every change as it happens. Git is the single source of truth. What you see is what git sees.
 
 ## Features
 
