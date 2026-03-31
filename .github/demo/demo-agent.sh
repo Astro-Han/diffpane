@@ -1,15 +1,19 @@
 #!/bin/bash
-# Simulates Claude Code terminal output for the demo GIF.
+# Simulates Codex CLI terminal output for the demo GIF.
+# Format matches real Codex CLI v0.117.0 interactive mode output.
 # Runs in the LEFT tmux pane. Makes real file changes so diffpane picks them up.
 
 DEMO_DIR="/tmp/diffpane-demo"
 
-# ANSI colors
+# ANSI colors matching Codex CLI palette
 BOLD='\033[1m'
 DIM='\033[2m'
-GREEN='\033[32m'
-PURPLE='\033[35m'
 RESET='\033[0m'
+
+# Codex uses a dimmed bullet for tool/action markers
+BULLET="${DIM}\xe2\x80\xa2${RESET}"  # •
+PROMPT="${BOLD}\xe2\x80\xba${RESET}" # ›
+CORNER="${DIM}\xe2\x94\x94${RESET}"  # └
 
 # Simulate typing (character by character)
 type_out() {
@@ -18,32 +22,42 @@ type_out() {
     printf '%s' "${text:$i:1}"
     sleep 0.03
   done
-  echo
 }
 
-# Wait for VHS hidden setup + Show (~4s setup, then ~1.5s empty visible)
-sleep 5
+# Horizontal separator matching Codex style
+separator() {
+  local cols
+  cols=$(tput cols 2>/dev/null || echo 60)
+  printf '%s' "${DIM}"
+  printf '%*s' "$cols" '' | tr ' ' '─'
+  printf '%s\n' "${RESET}"
+}
 
-# Claude Code banner
-echo -e "${BOLD}${PURPLE}  ╭────────────────────────────────────────╮${RESET}"
-echo -e "${BOLD}${PURPLE}  │${RESET}  ${PURPLE}✻${RESET}${BOLD}  Welcome to Claude Code!              ${PURPLE}│${RESET}"
-echo -e "${BOLD}${PURPLE}  │${RESET}     /help for help                      ${PURPLE}│${RESET}"
-echo -e "${BOLD}${PURPLE}  ╰────────────────────────────────────────╯${RESET}"
+# Wait for tmux setup (~2s already elapsed before recording starts)
+sleep 3
+
+# --- Codex prompt with user task ---
+printf '%s ' "${PROMPT}"
+type_out "Add a detail parameter to health endpoint, and a version to config"
+echo
+echo
+
+sleep 0.8
+
+# --- Phase 1: reading files ---
+echo -e "${BULLET} Reading project files to understand current structure."
+echo
+sleep 0.4
+
+echo -e "  ${CORNER} Read ${DIM}internal/handler/health.go${RESET}"
+sleep 0.6
+echo -e "  ${CORNER} Read ${DIM}internal/config/config.go${RESET}"
 echo
 sleep 0.8
 
-# --- Change 1: add detail param to health handler ---
-
-printf '%b> %b' "$BOLD" "$RESET"
-type_out "Add a detail parameter to the health endpoint"
-echo
-sleep 0.3
-
-echo -e "  ${PURPLE}⏺${RESET} Adding a ${BOLD}detail${RESET} query parameter with JSON response."
-echo
-sleep 0.5
-
-echo -e "    ${GREEN}Edit${RESET} ${DIM}internal/handler/health.go${RESET}"
+# --- Phase 2: first edit (health.go) ---
+echo -e "${BULLET} Edited ${BOLD}internal/handler/health.go${RESET}"
+echo -e "  ${CORNER} ${DIM}+8 -1${RESET}"
 
 # Make actual file change (triggers diffpane)
 cat >"$DEMO_DIR/internal/handler/health.go" <<'GOEOF'
@@ -71,23 +85,12 @@ func Health(w http.ResponseWriter, r *http.Request) {
 }
 GOEOF
 
-sleep 1
-echo -e "    ${GREEN}✓${RESET} Changes applied"
 echo
 sleep 1.5
 
-# --- Change 2: add version to config ---
-
-printf '%b> %b' "$BOLD" "$RESET"
-type_out "Add version to the config"
-echo
-sleep 0.3
-
-echo -e "  ${PURPLE}⏺${RESET} Adding a version field to the config map."
-echo
-sleep 0.5
-
-echo -e "    ${GREEN}Edit${RESET} ${DIM}internal/config/config.go${RESET}"
+# --- Phase 3: second edit (config.go) ---
+echo -e "${BULLET} Edited ${BOLD}internal/config/config.go${RESET}"
+echo -e "  ${CORNER} ${DIM}+1 -0${RESET}"
 
 # Make actual file change (triggers diffpane)
 cat >"$DEMO_DIR/internal/config/config.go" <<'GOEOF'
@@ -101,8 +104,22 @@ var Config = map[string]string{
 }
 GOEOF
 
+echo
 sleep 1
-echo -e "    ${GREEN}✓${RESET} Changes applied"
+
+# --- Phase 4: verification ---
+echo -e "${BULLET} Ran ${DIM}git diff --stat${RESET}"
+echo -e "  ${CORNER} ${DIM}2 files changed, 9 insertions(+), 1 deletion(-)${RESET}"
+echo
+
+sleep 0.5
+separator
+echo
+
+# --- Completion summary ---
+echo -e "${BULLET} Added ${BOLD}detail${RESET} query parameter to health handler and"
+echo -e "  ${BOLD}version${RESET} field to config map."
+echo
 
 # Keep alive so tmux pane doesn't close
 sleep 60

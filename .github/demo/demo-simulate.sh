@@ -14,6 +14,12 @@ git init -q
 git config user.email "demo@example.com"
 git config user.name "Demo"
 
+# Go module so Codex can run tests without errors
+cat >go.mod <<'EOF'
+module demo
+go 1.21
+EOF
+
 cat >internal/handler/health.go <<'EOF'
 package handler
 
