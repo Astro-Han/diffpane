@@ -1,7 +1,6 @@
 #!/bin/bash
 # Sets up a test git repo for the diffpane demo GIF.
 # Run BEFORE vhs: bash demo-simulate.sh
-# Then record:    vhs demo.tape
 
 set -e
 
