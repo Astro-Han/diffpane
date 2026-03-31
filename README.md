@@ -2,7 +2,7 @@
 
 Real-time TUI diff viewer for AI coding agents.
 
-<img src=".github/demo.gif" alt="diffpane demo" width="540" />
+<img src=".github/demo.gif" alt="diffpane demo" width="720" />
 
 ## Why
 
