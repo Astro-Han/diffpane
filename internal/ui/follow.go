@@ -61,40 +61,6 @@ func changedLineKeys(oldSigs []uint64, newHunks []internal.DiffHunk) map[lineKey
 	return changed
 }
 
-// hunkFingerprints hashes each hunk by rendered line semantics, excluding headers.
-func hunkFingerprints(hunks []internal.DiffHunk) []uint64 {
-	sigs := make([]uint64, 0, len(hunks))
-	for _, hunk := range hunks {
-		hasher := fnv.New64a()
-		for _, line := range hunk.Lines {
-			_, _ = hasher.Write([]byte{byte(line.Type), 0})
-			_, _ = hasher.Write([]byte(line.Content))
-			_, _ = hasher.Write([]byte{0})
-		}
-		sigs = append(sigs, hasher.Sum64())
-	}
-	return sigs
-}
-
-// changedHunkIndices finds every hunk whose fingerprint count exceeds the previous snapshot.
-func changedHunkIndices(oldSigs []uint64, newHunks []internal.DiffHunk) []int {
-	seen := make(map[uint64]int, len(oldSigs))
-	for _, sig := range oldSigs {
-		seen[sig]++
-	}
-
-	var changed []int
-	for i, sig := range hunkFingerprints(newHunks) {
-		if seen[sig] > 0 {
-			seen[sig]--
-			continue
-		}
-		changed = append(changed, i)
-	}
-
-	return changed
-}
-
 // hunkVisualOffset counts rendered rows before the target line for follow-mode scrolling.
 func hunkVisualOffset(file *internal.FileDiff, hunkIdx, lineIdx, width int) int {
 	if file == nil || hunkIdx < 0 || lineIdx < 0 {
