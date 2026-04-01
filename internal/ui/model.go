@@ -20,15 +20,16 @@ type Model struct {
 
 	FollowOn            bool
 	ScrollOffset        int
-	hunkSigs            map[string][]uint64
-	highlightedHunks    map[string]map[int]bool
+	prevLineSigs        map[string][]uint64
+	highlightedLines    map[string]map[lineKey]bool
 	lastChangedPath     string
 	lastHighlightedPath string
-	// followTargetPath/hunk track the last auto-follow target for resize recalculation.
-	followTargetPath string
-	followTargetHunk int
-	Notification     string
-	notificationSeq  int
+	// followTargetPath/hunk/line track the last auto-follow target for resize recalculation.
+	followTargetPath    string
+	followTargetHunk    int
+	followTargetLineIdx int
+	Notification        string
+	notificationSeq     int
 
 	OverlayOpen      bool
 	OverlayCursor    int
@@ -57,8 +58,8 @@ func NewModel(dirName, repoDir, baselineSHA string, files []internal.FileDiff) M
 		BaselineSHA:      baselineSHA,
 		Files:            files,
 		FollowOn:         true,
-		hunkSigs:         buildPrevHunkSigs(files),
-		highlightedHunks: make(map[string]map[int]bool),
+		prevLineSigs:     buildPrevLineSigs(files),
+		highlightedLines: make(map[string]map[lineKey]bool),
 		displayCache:     newDisplayLineCache(),
 	}
 }
@@ -82,8 +83,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Notification = "baseline reset"
 		m.resetPending = false
 		m.resetInFlight = false
-		m.hunkSigs = buildPrevHunkSigs(msg.Files)
-		m.highlightedHunks = make(map[string]map[int]bool)
+		m.prevLineSigs = buildPrevLineSigs(msg.Files)
+		m.highlightedLines = make(map[string]map[lineKey]bool)
 		m.lastChangedPath = ""
 		m.lastHighlightedPath = ""
 		m.clearFollowTarget()
@@ -181,28 +182,24 @@ func (m Model) applyFilesUpdate(msg FilesUpdatedMsg) Model {
 	}
 
 	m.Files = msg.Files
-	m.highlightedHunks = make(map[string]map[int]bool, len(m.Files))
+	m.highlightedLines = make(map[string]map[lineKey]bool, len(m.Files))
 
 	for _, file := range m.Files {
-		changed := changedHunkIndices(m.hunkSigs[file.Path], file.Hunks)
+		changed := changedLineKeys(m.prevLineSigs[file.Path], file.Hunks)
 		if len(changed) == 0 {
 			continue
 		}
-		hunks := make(map[int]bool, len(changed))
-		for _, idx := range changed {
-			hunks[idx] = true
-		}
-		m.highlightedHunks[file.Path] = hunks
+		m.highlightedLines[file.Path] = changed
 	}
 
 	m.lastChangedPath = lastChangedPathInFiles(msg.ChangedPaths, m.Files)
-	m.lastHighlightedPath = lastHighlightedPathInFiles(msg.ChangedPaths, m.highlightedHunks, m.Files)
+	m.lastHighlightedPath = lastHighlightedPathInFiles(msg.ChangedPaths, m.highlightedLines, m.Files)
 
 	if len(m.Files) == 0 {
 		m.CurrentIdx = 0
 		m.ScrollOffset = 0
-		m.hunkSigs = make(map[string][]uint64)
-		m.highlightedHunks = make(map[string]map[int]bool)
+		m.prevLineSigs = make(map[string][]uint64)
+		m.highlightedLines = make(map[string]map[lineKey]bool)
 		m.lastChangedPath = ""
 		m.lastHighlightedPath = ""
 		m.clearFollowTarget()
@@ -220,7 +217,7 @@ func (m Model) applyFilesUpdate(msg FilesUpdatedMsg) Model {
 		m.anchorCurrentPath(currentPath)
 	}
 
-	m.hunkSigs = buildPrevHunkSigs(m.Files)
+	m.prevLineSigs = buildPrevLineSigs(m.Files)
 	m.clampScrollOffset()
 	return m
 }
@@ -383,10 +380,11 @@ func (m *Model) setFollowTarget(targetIdx int) {
 	file := &m.Files[targetIdx]
 	m.CurrentIdx = targetIdx
 
-	if hunkIdx, ok := maxHighlightedHunkIndex(m.highlightedHunks[file.Path]); ok {
-		m.ScrollOffset = hunkVisualOffset(file, hunkIdx, 0, m.Width)
+	if hunkIdx, lineIdx, ok := latestHighlightedLine(m.highlightedLines[file.Path]); ok {
+		m.ScrollOffset = hunkVisualOffset(file, hunkIdx, lineIdx, m.Width)
 		m.followTargetPath = file.Path
 		m.followTargetHunk = hunkIdx
+		m.followTargetLineIdx = lineIdx
 	} else {
 		m.clearFollowTarget()
 		m.ScrollOffset = 0
@@ -399,6 +397,7 @@ func (m *Model) setFollowTarget(targetIdx int) {
 func (m *Model) clearFollowTarget() {
 	m.followTargetPath = ""
 	m.followTargetHunk = -1
+	m.followTargetLineIdx = -1
 }
 
 func (m *Model) anchorCurrentPath(currentPath string) {
@@ -420,7 +419,7 @@ func (m *Model) anchorCurrentPath(currentPath string) {
 
 // realignFollowTarget recomputes the stored follow target after width changes.
 func (m *Model) realignFollowTarget() {
-	if !m.FollowOn || m.followTargetPath == "" || m.followTargetHunk < 0 {
+	if !m.FollowOn || m.followTargetPath == "" || m.followTargetHunk < 0 || m.followTargetLineIdx < 0 {
 		return
 	}
 	if m.CurrentIdx < 0 || m.CurrentIdx >= len(m.Files) {
@@ -433,17 +432,21 @@ func (m *Model) realignFollowTarget() {
 		m.clearFollowTarget()
 		return
 	}
+	if m.followTargetLineIdx >= len(file.Hunks[m.followTargetHunk].Lines) {
+		m.clearFollowTarget()
+		return
+	}
 
-	m.ScrollOffset = hunkVisualOffset(file, m.followTargetHunk, 0, m.Width)
+	m.ScrollOffset = hunkVisualOffset(file, m.followTargetHunk, m.followTargetLineIdx, m.Width)
 }
 
-// buildPrevHunkSigs snapshots current file hunks for the next follow comparison.
-func buildPrevHunkSigs(files []internal.FileDiff) map[string][]uint64 {
-	prevHunkSigs := make(map[string][]uint64, len(files))
+// buildPrevLineSigs snapshots current file add/del lines for the next follow comparison.
+func buildPrevLineSigs(files []internal.FileDiff) map[string][]uint64 {
+	prevLineSigs := make(map[string][]uint64, len(files))
 	for _, file := range files {
-		prevHunkSigs[file.Path] = hunkFingerprints(file.Hunks)
+		prevLineSigs[file.Path] = lineFingerprints(file.Hunks)
 	}
-	return prevHunkSigs
+	return prevLineSigs
 }
 
 func fileIndexByPath(files []internal.FileDiff, path string) int {
@@ -467,7 +470,7 @@ func lastChangedPathInFiles(changedPaths []string, files []internal.FileDiff) st
 	return ""
 }
 
-func lastHighlightedPathInFiles(changedPaths []string, highlighted map[string]map[int]bool, files []internal.FileDiff) string {
+func lastHighlightedPathInFiles(changedPaths []string, highlighted map[string]map[lineKey]bool, files []internal.FileDiff) string {
 	for i := len(changedPaths) - 1; i >= 0; i-- {
 		path := changedPaths[i]
 		if fileIndexByPath(files, path) < 0 {
@@ -480,17 +483,40 @@ func lastHighlightedPathInFiles(changedPaths []string, highlighted map[string]ma
 	return ""
 }
 
-func maxHighlightedHunkIndex(highlighted map[int]bool) (int, bool) {
+// latestHighlightedLine returns the newest highlighted hunk and the first
+// highlighted line inside that hunk.
+func latestHighlightedLine(highlighted map[lineKey]bool) (int, int, bool) {
 	if len(highlighted) == 0 {
-		return -1, false
+		return -1, -1, false
 	}
-	maxIdx := -1
-	for idx := range highlighted {
-		if idx > maxIdx {
-			maxIdx = idx
+
+	bestHunkIdx := -1
+	bestLineIdx := -1
+	for key := range highlighted {
+		if key.HunkIdx > bestHunkIdx {
+			bestHunkIdx = key.HunkIdx
+			bestLineIdx = key.LineIdx
+			continue
+		}
+		if key.HunkIdx == bestHunkIdx && (bestLineIdx < 0 || key.LineIdx < bestLineIdx) {
+			bestLineIdx = key.LineIdx
 		}
 	}
-	return maxIdx, true
+	return bestHunkIdx, bestLineIdx, true
+}
+
+// highlightedHunksFromLines temporarily adapts line-level state to the old
+// hunk-level renderer until diffview switches to line-aware highlighting.
+func highlightedHunksFromLines(highlighted map[lineKey]bool) map[int]bool {
+	if len(highlighted) == 0 {
+		return nil
+	}
+
+	hunks := make(map[int]bool, len(highlighted))
+	for key := range highlighted {
+		hunks[key.HunkIdx] = true
+	}
+	return hunks
 }
 
 // clampScrollOffset keeps scroll state within the current diff viewport bounds.
@@ -535,7 +561,7 @@ func (m Model) View() string {
 	if m.OverlayOpen {
 		content = RenderOverlay(m.OverlaySnapshot, m.OverlayCursor, diffHeight, m.Width)
 	} else if len(m.Files) > 0 && m.CurrentIdx < len(m.Files) {
-		highlightSet := m.highlightedHunks[m.Files[m.CurrentIdx].Path]
+		highlightSet := highlightedHunksFromLines(m.highlightedLines[m.Files[m.CurrentIdx].Path])
 		lines := m.displayCache.get(&m.Files[m.CurrentIdx], m.Width, highlightSet, func() []string {
 			return diffDisplayLines(&m.Files[m.CurrentIdx], m.Width, highlightSet)
 		})

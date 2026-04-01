@@ -36,6 +36,23 @@ func addHunk(startLine int, content string) internal.DiffHunk {
 	}
 }
 
+// addHunkWithLines builds a multi-line added hunk for line-level follow tests.
+func addHunkWithLines(startLine int, contents ...string) internal.DiffHunk {
+	lines := make([]internal.DiffLine, 0, len(contents))
+	for _, content := range contents {
+		lines = append(lines, internal.DiffLine{
+			Type:    internal.LineAdd,
+			Content: content,
+		})
+	}
+
+	return internal.DiffHunk{
+		Header:    "@@ -0,0 +1,1 @@",
+		StartLine: startLine,
+		Lines:     lines,
+	}
+}
+
 // TestModelFollowSelectsLatestChanged verifies follow mode jumps to the latest changed path.
 func TestModelFollowSelectsLatestChanged(t *testing.T) {
 	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
@@ -164,9 +181,9 @@ func TestModelPausedFollowIgnoresVanishedChangedPaths(t *testing.T) {
 	}
 }
 
-// TestModelPausedFollowHighlightsCurrentFileWithoutNavigation verifies paused
+// TestModelPausedFollowHighlightsCurrentLineWithoutNavigation verifies paused
 // follow still refreshes highlight state for the current file without moving selection.
-func TestModelPausedFollowHighlightsCurrentFileWithoutNavigation(t *testing.T) {
+func TestModelPausedFollowHighlightsCurrentLineWithoutNavigation(t *testing.T) {
 	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
 		fileWithHunks("a.txt", addHunk(1, "old")),
 	})
@@ -176,7 +193,7 @@ func TestModelPausedFollowHighlightsCurrentFileWithoutNavigation(t *testing.T) {
 	updated, _ := model.Update(FilesUpdatedMsg{
 		BaselineSHA: "sha",
 		Files: []internal.FileDiff{
-			fileWithHunks("a.txt", addHunk(1, "old"), addHunk(2, "new")),
+			fileWithHunks("a.txt", addHunkWithLines(1, "old", "new")),
 		},
 		ChangedPaths: []string{"a.txt"},
 	})
@@ -185,8 +202,8 @@ func TestModelPausedFollowHighlightsCurrentFileWithoutNavigation(t *testing.T) {
 	if got.CurrentIdx != 0 {
 		t.Fatalf("CurrentIdx = %d, want 0", got.CurrentIdx)
 	}
-	if !got.highlightedHunks["a.txt"][1] {
-		t.Fatalf("highlightedHunks = %#v, want hunk 1 highlighted", got.highlightedHunks)
+	if !got.highlightedLines["a.txt"][lineKey{HunkIdx: 0, LineIdx: 1}] {
+		t.Fatalf("highlightedLines = %#v, want line 1 highlighted", got.highlightedLines)
 	}
 }
 
@@ -349,7 +366,7 @@ func TestModelRestoreFollowJumpsToLatestChanged(t *testing.T) {
 	model.FollowOn = false
 	model.CurrentIdx = 0
 	model.lastHighlightedPath = "c.txt"
-	model.highlightedHunks = map[string]map[int]bool{"c.txt": {0: true}}
+	model.highlightedLines = map[string]map[lineKey]bool{"c.txt": {{HunkIdx: 0, LineIdx: 0}: true}}
 
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
 	got := updated.(Model)
@@ -534,19 +551,20 @@ func TestModelManualResetClearsHighlightStateAndFollowAnchor(t *testing.T) {
 	model := NewModel("repo", "/tmp/repo", "old-sha", []internal.FileDiff{
 		fileWithHunks("a.txt", addHunk(1, "old")),
 	})
-	model.highlightedHunks = map[string]map[int]bool{"a.txt": {0: true}}
+	model.highlightedLines = map[string]map[lineKey]bool{"a.txt": {{HunkIdx: 0, LineIdx: 0}: true}}
 	model.lastChangedPath = "a.txt"
 	model.lastHighlightedPath = "a.txt"
 	model.followTargetPath = "a.txt"
 	model.followTargetHunk = 0
+	model.followTargetLineIdx = 0
 
 	afterReset, _ := model.Update(ManualResetMsg{
 		NewSHA: "new-sha",
 		Files:  []internal.FileDiff{fileWithHunks("a.txt", addHunk(1, "old"))},
 	})
 	got := afterReset.(Model)
-	if len(got.highlightedHunks) != 0 {
-		t.Fatalf("highlightedHunks = %#v, want empty after reset", got.highlightedHunks)
+	if len(got.highlightedLines) != 0 {
+		t.Fatalf("highlightedLines = %#v, want empty after reset", got.highlightedLines)
 	}
 	if got.lastChangedPath != "" {
 		t.Fatalf("lastChangedPath = %q, want empty", got.lastChangedPath)
@@ -554,8 +572,8 @@ func TestModelManualResetClearsHighlightStateAndFollowAnchor(t *testing.T) {
 	if got.lastHighlightedPath != "" {
 		t.Fatalf("lastHighlightedPath = %q, want empty", got.lastHighlightedPath)
 	}
-	if got.followTargetPath != "" || got.followTargetHunk != -1 {
-		t.Fatalf("follow target = %q/%d, want cleared", got.followTargetPath, got.followTargetHunk)
+	if got.followTargetPath != "" || got.followTargetHunk != -1 || got.followTargetLineIdx != -1 {
+		t.Fatalf("follow target = %q/%d/%d, want cleared", got.followTargetPath, got.followTargetHunk, got.followTargetLineIdx)
 	}
 }
 
@@ -1094,7 +1112,7 @@ func TestModelScrollOffsetStaysWithinContent(t *testing.T) {
 }
 
 // TestModelFollowScrollsToLatestChangedHunk verifies follow mode scrolls to
-// the newest changed hunk in the current file instead of resetting to top.
+// the newest highlighted line in the current file instead of resetting to top.
 func TestModelFollowScrollsToLatestChangedHunk(t *testing.T) {
 	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
 		fileWithHunks("a.txt",
@@ -1118,8 +1136,8 @@ func TestModelFollowScrollsToLatestChangedHunk(t *testing.T) {
 	})
 
 	got := updated.(Model)
-	if got.ScrollOffset != 4 {
-		t.Fatalf("ScrollOffset = %d, want 4", got.ScrollOffset)
+	if got.ScrollOffset != 5 {
+		t.Fatalf("ScrollOffset = %d, want 5", got.ScrollOffset)
 	}
 }
 
@@ -1158,8 +1176,8 @@ func TestModelRestoreFollowScrollsToAccumulatedChangedHunk(t *testing.T) {
 	if got.CurrentIdx != 2 {
 		t.Fatalf("CurrentIdx = %d, want 2", got.CurrentIdx)
 	}
-	if got.ScrollOffset != 4 {
-		t.Fatalf("ScrollOffset = %d, want 4", got.ScrollOffset)
+	if got.ScrollOffset != 5 {
+		t.Fatalf("ScrollOffset = %d, want 5", got.ScrollOffset)
 	}
 }
 
@@ -1337,7 +1355,7 @@ func TestModelPreservesHighlightAcrossNoopRefresh(t *testing.T) {
 	})
 
 	afterChange := firstUpdate.(Model)
-	beforeHighlight := afterChange.highlightedHunks
+	beforeHighlight := afterChange.highlightedLines
 	beforeLastChanged := afterChange.lastChangedPath
 	beforeLastHighlighted := afterChange.lastHighlightedPath
 
@@ -1353,8 +1371,8 @@ func TestModelPreservesHighlightAcrossNoopRefresh(t *testing.T) {
 	})
 
 	got := secondUpdate.(Model)
-	if !reflect.DeepEqual(got.highlightedHunks, beforeHighlight) {
-		t.Fatalf("highlightedHunks = %#v, want %#v preserved", got.highlightedHunks, beforeHighlight)
+	if !reflect.DeepEqual(got.highlightedLines, beforeHighlight) {
+		t.Fatalf("highlightedLines = %#v, want %#v preserved", got.highlightedLines, beforeHighlight)
 	}
 	if got.lastChangedPath != beforeLastChanged {
 		t.Fatalf("lastChangedPath = %q, want %q preserved", got.lastChangedPath, beforeLastChanged)
@@ -1365,7 +1383,7 @@ func TestModelPreservesHighlightAcrossNoopRefresh(t *testing.T) {
 }
 
 // TestModelRestoreFollowNewFileScrollsToLatestHighlightedHunk verifies that
-// restoring follow on a newly appeared file jumps to the last highlighted hunk.
+// restoring follow on a newly appeared file jumps to the highlighted line.
 func TestModelRestoreFollowNewFileScrollsToLatestHighlightedHunk(t *testing.T) {
 	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
 		fileWithHunks("a.txt", addHunk(10, "a")),
@@ -1399,8 +1417,11 @@ func TestModelRestoreFollowNewFileScrollsToLatestHighlightedHunk(t *testing.T) {
 	if got.CurrentIdx != 2 {
 		t.Fatalf("CurrentIdx = %d, want 2", got.CurrentIdx)
 	}
-	if got.ScrollOffset != 4 {
-		t.Fatalf("ScrollOffset = %d, want 4", got.ScrollOffset)
+	if got.ScrollOffset != 5 {
+		t.Fatalf("ScrollOffset = %d, want 5", got.ScrollOffset)
+	}
+	if got.followTargetHunk != 2 || got.followTargetLineIdx != 0 {
+		t.Fatalf("follow target = %d/%d, want 2/0", got.followTargetHunk, got.followTargetLineIdx)
 	}
 }
 
@@ -1431,8 +1452,40 @@ func TestModelRestoreFollowScrollsCurrentFileChange(t *testing.T) {
 
 	restored, _ := updated.(Model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
 	got := restored.(Model)
+	if got.ScrollOffset != 5 {
+		t.Fatalf("ScrollOffset = %d, want 5", got.ScrollOffset)
+	}
+}
+
+// TestModelFollowTargetsFirstHighlightedLineInsideLatestHunk verifies follow
+// mode lands on the first highlighted line inside the latest changed hunk.
+func TestModelFollowTargetsFirstHighlightedLineInsideLatestHunk(t *testing.T) {
+	model := NewModel("repo", "/tmp/repo", "sha", []internal.FileDiff{
+		fileWithHunks("a.txt",
+			addHunk(10, "stable"),
+			addHunk(20, "old"),
+		),
+	})
+	model.Width = 80
+	model.Height = 3
+
+	updated, _ := model.Update(FilesUpdatedMsg{
+		BaselineSHA: "sha",
+		Files: []internal.FileDiff{
+			fileWithHunks("a.txt",
+				addHunk(10, "stable"),
+				addHunkWithLines(20, "old", "latest"),
+			),
+		},
+		ChangedPaths: []string{"a.txt"},
+	})
+
+	got := updated.(Model)
 	if got.ScrollOffset != 4 {
 		t.Fatalf("ScrollOffset = %d, want 4", got.ScrollOffset)
+	}
+	if got.followTargetHunk != 1 || got.followTargetLineIdx != 1 {
+		t.Fatalf("follow target = %d/%d, want 1/1", got.followTargetHunk, got.followTargetLineIdx)
 	}
 }
 
@@ -1459,14 +1512,14 @@ func TestModelResizeRecalculatesFollowTargetOffset(t *testing.T) {
 	})
 
 	got := updated.(Model)
-	if got.ScrollOffset != 2 {
-		t.Fatalf("ScrollOffset before resize = %d, want 2", got.ScrollOffset)
+	if got.ScrollOffset != 3 {
+		t.Fatalf("ScrollOffset before resize = %d, want 3", got.ScrollOffset)
 	}
 
 	resized, _ := got.Update(tea.WindowSizeMsg{Width: 6, Height: 3})
 	afterResize := resized.(Model)
-	if afterResize.ScrollOffset != 3 {
-		t.Fatalf("ScrollOffset after resize = %d, want 3", afterResize.ScrollOffset)
+	if afterResize.ScrollOffset != 4 {
+		t.Fatalf("ScrollOffset after resize = %d, want 4", afterResize.ScrollOffset)
 	}
 }
 
@@ -1492,7 +1545,7 @@ func TestModelFollowScrollsExistingEmptyHunkFile(t *testing.T) {
 	})
 
 	got := updated.(Model)
-	if got.ScrollOffset != 4 {
-		t.Fatalf("ScrollOffset = %d, want 4", got.ScrollOffset)
+	if got.ScrollOffset != 5 {
+		t.Fatalf("ScrollOffset = %d, want 5", got.ScrollOffset)
 	}
 }
