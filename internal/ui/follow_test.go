@@ -2,7 +2,6 @@ package ui
 
 import (
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/Astro-Han/diffpane/internal"
@@ -25,153 +24,119 @@ func addLine(content string) internal.DiffLine {
 	}
 }
 
-// TestHunkFingerprintsIgnoreHeaderChanges verifies header-only shifts keep the same signature.
-func TestHunkFingerprintsIgnoreHeaderChanges(t *testing.T) {
-	first := hunkFingerprints([]internal.DiffHunk{
-		testHunk("@@ -1,1 +1,1 @@", 10, addLine("same content")),
-	})
-	second := hunkFingerprints([]internal.DiffHunk{
-		testHunk("@@ -8,1 +9,1 @@", 99, addLine("same content")),
-	})
-
-	if len(first) != 1 || len(second) != 1 {
-		t.Fatalf("unexpected signature lengths: %v %v", first, second)
-	}
-	if first[0] != second[0] {
-		t.Fatalf("header-only change produced different signatures: %d vs %d", first[0], second[0])
+// delLine builds one deleted diff line for helper tests.
+func delLine(content string) internal.DiffLine {
+	return internal.DiffLine{
+		Type:    internal.LineDel,
+		Content: content,
 	}
 }
 
-// TestHunkFingerprintsChangeOnContent verifies line-content edits change the signature.
-func TestHunkFingerprintsChangeOnContent(t *testing.T) {
-	first := hunkFingerprints([]internal.DiffHunk{
-		testHunk("@@ -1,1 +1,1 @@", 10, addLine("before")),
-	})
-	second := hunkFingerprints([]internal.DiffHunk{
-		testHunk("@@ -1,1 +1,1 @@", 10, addLine("after")),
-	})
-
-	if first[0] == second[0] {
-		t.Fatalf("content change should alter fingerprint, got %d", first[0])
+// ctxLine builds one context diff line for helper tests.
+func ctxLine(content string) internal.DiffLine {
+	return internal.DiffLine{
+		Type:    internal.LineContext,
+		Content: content,
 	}
 }
 
-// TestChangedHunkIndices verifies multiset-based hunk detection across key cases.
-func TestChangedHunkIndices(t *testing.T) {
+// TestLineFingerprintsSkipContextAndHeader verifies that only add and delete
+// lines affect the snapshot, not hunk headers or context lines.
+func TestLineFingerprintsSkipContextAndHeader(t *testing.T) {
+	first := lineFingerprints([]internal.DiffHunk{
+		testHunk("@@ -1,3 +1,3 @@", 10,
+			ctxLine("shared context"),
+			addLine("shared add"),
+			delLine("shared del"),
+		),
+	})
+	second := lineFingerprints([]internal.DiffHunk{
+		testHunk("@@ -9,3 +9,3 @@", 99,
+			ctxLine("different context"),
+			addLine("shared add"),
+			delLine("shared del"),
+		),
+	})
+
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("lineFingerprints() = %#v, want %#v", first, second)
+	}
+}
+
+// TestChangedLineKeys verifies multiset-based line detection across a few
+// representative change shapes.
+func TestChangedLineKeys(t *testing.T) {
 	baseHunks := []internal.DiffHunk{
-		testHunk("@@ -1,1 +1,1 @@", 10, addLine("a")),
-		testHunk("@@ -2,1 +2,1 @@", 20, addLine("b")),
+		testHunk("@@ -1,2 +1,2 @@", 10, addLine("same")),
+		testHunk("@@ -2,2 +2,2 @@", 20, addLine("dup")),
 	}
-	baseSigs := hunkFingerprints(baseHunks)
+	baseSigs := lineFingerprints(baseHunks)
 
 	tests := []struct {
 		name     string
 		oldSigs  []uint64
 		newHunks []internal.DiffHunk
-		want     []int
+		want     map[lineKey]bool
 	}{
 		{
 			name:    "no change",
 			oldSigs: baseSigs,
 			newHunks: []internal.DiffHunk{
-				testHunk("@@ -10,1 +10,1 @@", 100, addLine("a")),
-				testHunk("@@ -20,1 +20,1 @@", 200, addLine("b")),
+				testHunk("@@ -10,2 +10,2 @@", 100, ctxLine("ignored"), addLine("same")),
+				testHunk("@@ -20,2 +20,2 @@", 200, addLine("dup")),
 			},
-			want: nil,
+			want: map[lineKey]bool{},
 		},
 		{
-			name:    "content modification",
+			name:    "new duplicate only marks the extra line",
 			oldSigs: baseSigs,
 			newHunks: []internal.DiffHunk{
-				testHunk("@@ -1,1 +1,1 @@", 10, addLine("a")),
-				testHunk("@@ -2,1 +2,1 @@", 20, addLine("changed")),
+				testHunk("@@ -10,2 +10,2 @@", 100, addLine("same")),
+				testHunk("@@ -20,2 +20,2 @@", 200, addLine("dup")),
+				testHunk("@@ -30,2 +30,2 @@", 300, addLine("dup")),
 			},
-			want: []int{1},
+			want: map[lineKey]bool{
+				{HunkIdx: 2, LineIdx: 0}: true,
+			},
 		},
 		{
-			name:    "hunk insertion",
+			name:    "changed content is flagged at its line key",
 			oldSigs: baseSigs,
 			newHunks: []internal.DiffHunk{
-				testHunk("@@ -1,1 +1,1 @@", 10, addLine("a")),
-				testHunk("@@ -3,1 +3,1 @@", 15, addLine("inserted")),
-				testHunk("@@ -2,1 +2,1 @@", 20, addLine("b")),
+				testHunk("@@ -10,2 +10,2 @@", 100, addLine("same")),
+				testHunk("@@ -20,2 +20,2 @@", 200, addLine("changed")),
 			},
-			want: []int{1},
-		},
-		{
-			name: "hunk removal",
-			oldSigs: hunkFingerprints([]internal.DiffHunk{
-				testHunk("@@ -1,1 +1,1 @@", 10, addLine("a")),
-				testHunk("@@ -2,1 +2,1 @@", 20, addLine("b")),
-				testHunk("@@ -3,1 +3,1 @@", 30, addLine("c")),
-			}),
-			newHunks: []internal.DiffHunk{
-				testHunk("@@ -1,1 +1,1 @@", 10, addLine("a")),
-				testHunk("@@ -3,1 +3,1 @@", 30, addLine("c")),
+			want: map[lineKey]bool{
+				{HunkIdx: 1, LineIdx: 0}: true,
 			},
-			want: nil,
-		},
-		{
-			name:    "empty previous set",
-			oldSigs: nil,
-			newHunks: []internal.DiffHunk{
-				testHunk("@@ -1,1 +1,1 @@", 10, addLine("a")),
-				testHunk("@@ -2,1 +2,1 @@", 20, addLine("b")),
-			},
-			want: []int{0, 1},
-		},
-		{
-			name: "duplicate hunk content",
-			oldSigs: hunkFingerprints([]internal.DiffHunk{
-				testHunk("@@ -1,1 +1,1 @@", 10, addLine("same")),
-			}),
-			newHunks: []internal.DiffHunk{
-				testHunk("@@ -1,1 +1,1 @@", 10, addLine("same")),
-				testHunk("@@ -2,1 +2,1 @@", 20, addLine("same")),
-			},
-			want: []int{1},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := changedHunkIndices(tt.oldSigs, tt.newHunks)
+			got := changedLineKeys(tt.oldSigs, tt.newHunks)
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("changedHunkIndices() = %#v, want %#v", got, tt.want)
+				t.Fatalf("changedLineKeys() = %#v, want %#v", got, tt.want)
 			}
 		})
 	}
 }
 
-// TestHunkVisualOffsetCountsWrappedLines verifies wrapped lines count toward the scroll target.
-func TestHunkVisualOffsetCountsWrappedLines(t *testing.T) {
+// TestHunkVisualOffsetTargetsHighlightedLine verifies the scroll offset lands
+// on the target line inside the hunk, counting wrapped visual rows.
+func TestHunkVisualOffsetTargetsHighlightedLine(t *testing.T) {
 	file := &internal.FileDiff{
 		Path: "a.txt",
 		Hunks: []internal.DiffHunk{
-			testHunk("@@ -1,1 +1,1 @@", 10, addLine("abcdefghi")),
-			testHunk("@@ -2,1 +2,1 @@", 20, addLine("z")),
+			testHunk("@@ -1,2 +1,2 @@", 10,
+				addLine("abcdefghi"),
+				addLine("z"),
+			),
 		},
 	}
 
 	got := hunkVisualOffset(file, 1, 6)
 	if got != 3 {
 		t.Fatalf("hunkVisualOffset() = %d, want 3", got)
-	}
-}
-
-// TestHunkVisualOffsetUsesContentWidth verifies follow-mode row math matches
-// the new gutter-aware wrapping width.
-func TestHunkVisualOffsetUsesContentWidth(t *testing.T) {
-	file := &internal.FileDiff{
-		Path: "a.txt",
-		Hunks: []internal.DiffHunk{
-			testHunk("@@ -1,1 +1,1 @@", 10, addLine(strings.Repeat("a", 55))),
-			testHunk("@@ -2,1 +2,1 @@", 20, addLine("z")),
-		},
-	}
-
-	got := hunkVisualOffset(file, 1, 40)
-	if got != 3 {
-		t.Fatalf("hunkVisualOffset() = %d, want 3 rows before second hunk", got)
 	}
 }
