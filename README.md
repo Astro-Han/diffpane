@@ -53,7 +53,7 @@ Split your terminal. Left pane: your AI agent. Right pane: diffpane.
 
 ## Requirements
 
-- macOS (darwin/amd64 or darwin/arm64)
+- macOS or Linux (amd64 or arm64)
 - Git
 
 ## License
