@@ -425,7 +425,7 @@ func TestDisplayLineCacheMissesWhenHighlightStateChanges(t *testing.T) {
 	}
 
 	builds := 0
-	cache.get(file, 80, map[int]bool{0: true}, func() []string {
+	cache.get(file, 80, map[lineKey]bool{{HunkIdx: 0, LineIdx: 0}: true}, func() []string {
 		builds++
 		return []string{"first"}
 	})
@@ -675,12 +675,48 @@ func TestDiffDisplayLinesTrueColorPadsBackgroundAcrossViewport(t *testing.T) {
 		}},
 	}
 
-	line := diffDisplayLines(file, 30, map[int]bool{0: true})[1]
+	line := diffDisplayLines(file, 30, map[lineKey]bool{{HunkIdx: 0, LineIdx: 0}: true})[1]
 	if !strings.Contains(line, "\033[48;2;") {
 		t.Fatalf("true-color add line should contain background ANSI, got %q", line)
 	}
 	if lipgloss.Width(line) != 30 {
 		t.Fatalf("rendered width = %d, want 30", lipgloss.Width(line))
+	}
+}
+
+// TestDiffDisplayLinesHighlightsOnlyMarkedLine verifies line-level highlight
+// state does not spill across other lines in the same hunk.
+func TestDiffDisplayLinesHighlightsOnlyMarkedLine(t *testing.T) {
+	prevProfile := colorProfileFn
+	colorProfileFn = func() termenv.Profile { return termenv.TrueColor }
+	defer func() { colorProfileFn = prevProfile }()
+	defer setThemeForTest(ThemeDark)()
+
+	file := &internal.FileDiff{
+		Path: "main.go",
+		Hunks: []internal.DiffHunk{{
+			Header: "@@ -0,0 +1,2 @@",
+			Lines: []internal.DiffLine{
+				{
+					Type:      internal.LineAdd,
+					Content:   "first",
+					NewLineNo: 1,
+				},
+				{
+					Type:      internal.LineAdd,
+					Content:   "second",
+					NewLineNo: 2,
+				},
+			},
+		}},
+	}
+
+	lines := diffDisplayLines(file, 30, map[lineKey]bool{{HunkIdx: 0, LineIdx: 1}: true})
+	if strings.Contains(lines[1], "\033[48;2;") {
+		t.Fatalf("first line should not contain background ANSI, got %q", lines[1])
+	}
+	if !strings.Contains(lines[2], "\033[48;2;") {
+		t.Fatalf("second line should contain background ANSI, got %q", lines[2])
 	}
 }
 

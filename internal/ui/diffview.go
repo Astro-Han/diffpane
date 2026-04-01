@@ -40,7 +40,7 @@ func newDisplayLineCache() *displayLineCache {
 
 // get returns cached rendered lines when the file signature, width, and
 // highlight state match.
-func (c *displayLineCache) get(file *internal.FileDiff, width int, highlightSet map[int]bool, build func() []string) []string {
+func (c *displayLineCache) get(file *internal.FileDiff, width int, highlightSet map[lineKey]bool, build func() []string) []string {
 	if c == nil {
 		return build()
 	}
@@ -67,7 +67,7 @@ func (c *displayLineCache) get(file *internal.FileDiff, width int, highlightSet 
 }
 
 // newDisplayLineCacheKey fingerprints the rendered inputs that affect visual lines.
-func newDisplayLineCacheKey(file *internal.FileDiff, width int, highlightSet map[int]bool) displayLineCacheKey {
+func newDisplayLineCacheKey(file *internal.FileDiff, width int, highlightSet map[lineKey]bool) displayLineCacheKey {
 	key := displayLineCacheKey{width: width}
 	if file == nil {
 		return key
@@ -90,7 +90,7 @@ func newDisplayLineCacheKey(file *internal.FileDiff, width int, highlightSet map
 }
 
 // RenderDiffView renders the current file diff within the viewport.
-func RenderDiffView(file *internal.FileDiff, scrollOffset, width, height int, highlightSet map[int]bool) string {
+func RenderDiffView(file *internal.FileDiff, scrollOffset, width, height int, highlightSet map[lineKey]bool) string {
 	lines := diffDisplayLines(file, width, highlightSet)
 	return renderDisplayLines(lines, scrollOffset, height)
 }
@@ -179,7 +179,7 @@ func renderSeparator(width int) string {
 }
 
 // diffDisplayLines expands one file diff into the exact visual lines shown in the viewport.
-func diffDisplayLines(file *internal.FileDiff, width int, highlightSet map[int]bool) []string {
+func diffDisplayLines(file *internal.FileDiff, width int, highlightSet map[lineKey]bool) []string {
 	if file == nil {
 		return nil
 	}
@@ -202,9 +202,9 @@ func diffDisplayLines(file *internal.FileDiff, width int, highlightSet map[int]b
 
 	var lines []string
 	for hunkIdx, hunk := range file.Hunks {
-		highlightedHunk := highlightSet[hunkIdx]
 		lines = append(lines, renderSeparator(width))
-		for _, diffLine := range hunk.Lines {
+		for lineIdx, diffLine := range hunk.Lines {
+			highlightedLine := highlightSet[lineKey{HunkIdx: hunkIdx, LineIdx: lineIdx}]
 			lineNo := displayedLineNo(diffLine)
 			for i, segment := range wrapLineParts(diffLine.Content, contentWidth) {
 				if compactGutter {
@@ -212,7 +212,7 @@ func diffDisplayLines(file *internal.FileDiff, width int, highlightSet map[int]b
 					if i == 0 {
 						prefix = diffPrefix(diffLine.Type)
 					}
-					lines = append(lines, renderDiffSegment("", prefix, segment, diffLine.Type, width, file.Path, highlightedHunk))
+					lines = append(lines, renderDiffSegment("", prefix, segment, diffLine.Type, width, file.Path, highlightedLine))
 					continue
 				}
 
@@ -222,7 +222,7 @@ func diffDisplayLines(file *internal.FileDiff, width int, highlightSet map[int]b
 					lineNoText = formatDisplayedLineNo(lineNo, lineNumberWidth)
 					prefix = diffPrefix(diffLine.Type)
 				}
-				lines = append(lines, renderDiffSegment(lineNoText, prefix, segment, diffLine.Type, width, file.Path, highlightedHunk))
+				lines = append(lines, renderDiffSegment(lineNoText, prefix, segment, diffLine.Type, width, file.Path, highlightedLine))
 			}
 		}
 	}
@@ -427,20 +427,25 @@ func renderDiffSegment(lineNoText, prefix, code string, lineType internal.LineTy
 	}
 }
 
-func highlightSignature(highlightSet map[int]bool) uint64 {
+func highlightSignature(highlightSet map[lineKey]bool) uint64 {
 	if len(highlightSet) == 0 {
 		return 0
 	}
 
-	indices := make([]int, 0, len(highlightSet))
-	for idx := range highlightSet {
-		indices = append(indices, idx)
+	keys := make([]lineKey, 0, len(highlightSet))
+	for key := range highlightSet {
+		keys = append(keys, key)
 	}
-	sort.Ints(indices)
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].HunkIdx != keys[j].HunkIdx {
+			return keys[i].HunkIdx < keys[j].HunkIdx
+		}
+		return keys[i].LineIdx < keys[j].LineIdx
+	})
 
 	hasher := fnv.New64a()
-	for _, idx := range indices {
-		_, _ = hasher.Write([]byte(fmt.Sprintf("%d\x00", idx)))
+	for _, key := range keys {
+		_, _ = hasher.Write([]byte(fmt.Sprintf("%d\x00%d\x00", key.HunkIdx, key.LineIdx)))
 	}
 
 	return hasher.Sum64()

@@ -505,20 +505,6 @@ func latestHighlightedLine(highlighted map[lineKey]bool) (int, int, bool) {
 	return bestHunkIdx, bestLineIdx, true
 }
 
-// highlightedHunksFromLines temporarily adapts line-level state to the old
-// hunk-level renderer until diffview switches to line-aware highlighting.
-func highlightedHunksFromLines(highlighted map[lineKey]bool) map[int]bool {
-	if len(highlighted) == 0 {
-		return nil
-	}
-
-	hunks := make(map[int]bool, len(highlighted))
-	for key := range highlighted {
-		hunks[key.HunkIdx] = true
-	}
-	return hunks
-}
-
 // clampScrollOffset keeps scroll state within the current diff viewport bounds.
 func (m *Model) clampScrollOffset() {
 	if m.ScrollOffset < 0 {
@@ -561,7 +547,7 @@ func (m Model) View() string {
 	if m.OverlayOpen {
 		content = RenderOverlay(m.OverlaySnapshot, m.OverlayCursor, diffHeight, m.Width)
 	} else if len(m.Files) > 0 && m.CurrentIdx < len(m.Files) {
-		highlightSet := highlightedHunksFromLines(m.highlightedLines[m.Files[m.CurrentIdx].Path])
+		highlightSet := m.highlightedLines[m.Files[m.CurrentIdx].Path]
 		lines := m.displayCache.get(&m.Files[m.CurrentIdx], m.Width, highlightSet, func() []string {
 			return diffDisplayLines(&m.Files[m.CurrentIdx], m.Width, highlightSet)
 		})
