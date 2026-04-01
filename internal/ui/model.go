@@ -384,7 +384,7 @@ func (m *Model) setFollowTarget(targetIdx int) {
 	m.CurrentIdx = targetIdx
 
 	if hunkIdx, ok := maxHighlightedHunkIndex(m.highlightedHunks[file.Path]); ok {
-		m.ScrollOffset = hunkVisualOffset(file, hunkIdx, m.Width)
+		m.ScrollOffset = hunkVisualOffset(file, hunkIdx, 0, m.Width)
 		m.followTargetPath = file.Path
 		m.followTargetHunk = hunkIdx
 	} else {
@@ -434,7 +434,7 @@ func (m *Model) realignFollowTarget() {
 		return
 	}
 
-	m.ScrollOffset = hunkVisualOffset(file, m.followTargetHunk, m.Width)
+	m.ScrollOffset = hunkVisualOffset(file, m.followTargetHunk, 0, m.Width)
 }
 
 // buildPrevHunkSigs snapshots current file hunks for the next follow comparison.

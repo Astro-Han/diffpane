@@ -2,6 +2,7 @@ package ui
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Astro-Han/diffpane/internal"
@@ -122,6 +123,24 @@ func TestChangedLineKeys(t *testing.T) {
 	}
 }
 
+// TestChangedLineKeysUseOriginalDiffLineIndex verifies lineKey.LineIdx keeps the
+// line position from DiffHunk.Lines even when context rows appear earlier.
+func TestChangedLineKeysUseOriginalDiffLineIndex(t *testing.T) {
+	got := changedLineKeys(nil, []internal.DiffHunk{
+		testHunk("@@ -1,3 +1,3 @@", 10,
+			ctxLine("ctx"),
+			addLine("new"),
+		),
+	})
+
+	want := map[lineKey]bool{
+		{HunkIdx: 0, LineIdx: 1}: true,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("changedLineKeys() = %#v, want %#v", got, want)
+	}
+}
+
 // TestHunkVisualOffsetTargetsHighlightedLine verifies the scroll offset lands
 // on the target line inside the hunk, counting wrapped visual rows.
 func TestHunkVisualOffsetTargetsHighlightedLine(t *testing.T) {
@@ -135,8 +154,29 @@ func TestHunkVisualOffsetTargetsHighlightedLine(t *testing.T) {
 		},
 	}
 
-	got := hunkVisualOffset(file, 1, 6)
+	got := hunkVisualOffset(file, 0, 1, 6)
 	if got != 3 {
 		t.Fatalf("hunkVisualOffset() = %d, want 3", got)
+	}
+}
+
+// TestHunkVisualOffsetTargetsLineInsideLatestHunk verifies follow mode can
+// land on the first highlighted line inside a later hunk instead of its start.
+func TestHunkVisualOffsetTargetsLineInsideLatestHunk(t *testing.T) {
+	file := &internal.FileDiff{
+		Path: "a.txt",
+		Hunks: []internal.DiffHunk{
+			testHunk("@@ -1,1 +1,1 @@", 10, addLine(strings.Repeat("a", 55))),
+			testHunk("@@ -2,3 +2,3 @@", 20,
+				ctxLine("ctx"),
+				addLine("old"),
+				addLine("latest"),
+			),
+		},
+	}
+
+	got := hunkVisualOffset(file, 1, 2, 40)
+	if got != 6 {
+		t.Fatalf("hunkVisualOffset() = %d, want 6", got)
 	}
 }

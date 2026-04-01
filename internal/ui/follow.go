@@ -6,7 +6,7 @@ import (
 	"github.com/Astro-Han/diffpane/internal"
 )
 
-// lineKey identifies one non-context line inside a hunk.
+// lineKey identifies one diff line by its original position inside a hunk.
 type lineKey struct {
 	HunkIdx int
 	LineIdx int
@@ -35,7 +35,7 @@ func lineFingerprints(hunks []internal.DiffHunk) []uint64 {
 	return sigs
 }
 
-// changedLineKeys reports the non-context lines that do not appear in the old snapshot.
+// changedLineKeys reports the add/delete lines that do not appear in the old snapshot.
 func changedLineKeys(oldSigs []uint64, newHunks []internal.DiffHunk) map[lineKey]bool {
 	seen := make(map[uint64]int, len(oldSigs))
 	for _, sig := range oldSigs {
@@ -44,8 +44,7 @@ func changedLineKeys(oldSigs []uint64, newHunks []internal.DiffHunk) map[lineKey
 
 	changed := make(map[lineKey]bool)
 	for hunkIdx, hunk := range newHunks {
-		lineIdx := 0
-		for _, line := range hunk.Lines {
+		for lineIdx, line := range hunk.Lines {
 			if line.Type == internal.LineContext {
 				continue
 			}
@@ -56,7 +55,6 @@ func changedLineKeys(oldSigs []uint64, newHunks []internal.DiffHunk) map[lineKey
 			} else {
 				changed[lineKey{HunkIdx: hunkIdx, LineIdx: lineIdx}] = true
 			}
-			lineIdx++
 		}
 	}
 
@@ -98,40 +96,27 @@ func changedHunkIndices(oldSigs []uint64, newHunks []internal.DiffHunk) []int {
 }
 
 // hunkVisualOffset counts rendered rows before the target line for follow-mode scrolling.
-func hunkVisualOffset(file *internal.FileDiff, targetLineIdx, width int) int {
-	if file == nil || targetLineIdx < 0 {
+func hunkVisualOffset(file *internal.FileDiff, hunkIdx, lineIdx, width int) int {
+	if file == nil || hunkIdx < 0 || lineIdx < 0 {
 		return 0
 	}
 
 	contentWidth := max(1, width-gutterWidth(file, width))
-	// Keep the legacy hunk-based behavior for multi-hunk files until the
-	// higher layers start passing a line index instead of a hunk index.
-	if len(file.Hunks) > 1 && targetLineIdx < len(file.Hunks) {
-		offset := 0
-		for i := 0; i < targetLineIdx && i < len(file.Hunks); i++ {
-			hunk := file.Hunks[i]
-			offset++
-			for _, line := range hunk.Lines {
-				offset += len(wrapLineParts(line.Content, contentWidth))
-			}
+	offset := 0
+	for i := 0; i < hunkIdx && i < len(file.Hunks); i++ {
+		offset++
+		for _, line := range file.Hunks[i].Lines {
+			offset += len(wrapLineParts(line.Content, contentWidth))
 		}
+	}
+
+	if hunkIdx >= len(file.Hunks) {
 		return offset
 	}
 
-	if len(file.Hunks) == 0 {
-		return 0
-	}
-
-	offset := 1
-	seenLines := 0
-	for _, line := range file.Hunks[0].Lines {
-		if seenLines >= targetLineIdx {
-			break
-		}
-		offset += len(wrapLineParts(line.Content, contentWidth))
-		if line.Type != internal.LineContext {
-			seenLines++
-		}
+	offset++
+	for i := 0; i < lineIdx && i < len(file.Hunks[hunkIdx].Lines); i++ {
+		offset += len(wrapLineParts(file.Hunks[hunkIdx].Lines[i].Content, contentWidth))
 	}
 
 	return offset
