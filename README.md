@@ -56,6 +56,10 @@ Split your terminal. Left pane: your AI agent. Right pane: diffpane.
 - macOS or Linux (amd64 or arm64)
 - Git
 
+## Also by the Author
+
+[**claude-pace**](https://github.com/Astro-Han/claude-pace) - Pace-aware statusline for Claude Code. Know your quota before you hit the wall.
+
 ## License
 
 MIT
